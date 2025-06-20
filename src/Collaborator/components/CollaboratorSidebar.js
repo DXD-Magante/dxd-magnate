@@ -49,28 +49,18 @@ const CollaboratorSidebar = ({
       icon: <FiCheckSquare size={20} />,
       items: [
         "All Tasks",
-        "To Do",  
-        "In Progress",     
-        "Waiting Review",
-        "Completed",
-        "Backlogs",
-        // "Collaboration Tasks" will be added conditionally below
+        "Progress Tracking"
       ]
     },
     {
       title: "Projects",
       icon: <FiLayers size={20} />,
-      items: ["My Projects","Timelines", "Milestones", "Team Collaboration"]
-    },
-    {
-      title: "Resources",
-      icon: <FiFolder size={20} />,
-      items: ["Training Materials", "Templates", "Internal Tools"]
+      items: ["My Projects","Analytics", "Resources", "Team Collaboration"]
     },
     {
       title: "Meetings",
       icon: <FiCalendar size={20} />,
-      items: ["Upcoming", "Meeting Notes"]
+      items: ["Upcoming",]
     },
     {
       title: "Performance & Learning",

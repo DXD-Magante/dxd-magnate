@@ -7,7 +7,7 @@ import {
   Badge, IconButton, Collapse, LinearProgress, Tooltip,
   FormControl, InputLabel, Select, MenuItem, Switch,
   CircularProgress, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, 
+  TableHead, TableRow, InputAdornment
 } from '@mui/material';
 import {
   FiEdit2, FiMail, FiPhone, FiUser, FiCalendar,
@@ -21,10 +21,11 @@ import {
   FiFile, FiDownloadCloud, FiShare2, FiClock as FiClockIcon,
   FiCalendar as FiCalendarIcon, FiClipboard, FiThumbsUp,
   FiThumbsDown, FiPaperclip, FiBookmark, FiSettings as FiSettingsIcon,
-  FiChevronRight, FiSearch, FiPrinter, FiAlertCircle
+  FiChevronRight, FiSearch, FiPrinter, FiAlertCircle, FiCamera, FiTrash2, FiEyeOff
 } from 'react-icons/fi';
 import { auth, db } from '../../services/firebase';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
+import { updateProfile } from 'firebase/auth';
 import { useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 
@@ -36,6 +37,13 @@ import TasksTab from './Client tabs/Tasks';
 import CommunicationTab from './Client tabs/Communications';
 import ResourcesTab from './Client tabs/Resources';
 import SettingsTab from './Client tabs/Settings';
+
+// Cloudinary configuration
+const CLOUDINARY_CONFIG = {
+  cloudName: 'dsbt1j73t',
+  uploadPreset: 'dxd-magnate',
+  apiKey: '753871594898224'
+};
 
 const ClientProfile = () => {
   const { username } = useParams();
@@ -55,6 +63,11 @@ const ClientProfile = () => {
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [transactionError, setTransactionError] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [openAvatarDialog, setOpenAvatarDialog] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
 
   // Fetch transactions when financial tab is active
   useEffect(() => {
@@ -131,6 +144,7 @@ const ClientProfile = () => {
           const doc = querySnapshot.docs[0];
           setProfileData(doc.data());
           setTempData(doc.data());
+          setPreviewUrl(doc.data().photoURL || auth.currentUser?.photoURL);
         } else {
           throw new Error("User not found");
         }
@@ -143,6 +157,7 @@ const ClientProfile = () => {
           if (userSnap.exists()) {
             setProfileData(userSnap.data());
             setTempData(userSnap.data());
+            setPreviewUrl(userSnap.data().photoURL || user.photoURL);
           } else {
             throw new Error("User data not found");
           }
@@ -257,6 +272,139 @@ const ClientProfile = () => {
     return new Date(dateString).toLocaleDateString('en-US', options);
   };
 
+  // Avatar handling functions
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.match('image.*')) {
+      setSnackbarMessage("Please select an image file");
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setSnackbarMessage("File size should be less than 5MB");
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
+      return;
+    }
+
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const uploadToCloudinary = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset);
+    formData.append('cloud_name', CLOUDINARY_CONFIG.cloudName);
+
+    try {
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloudName}/upload`,
+        {
+          method: 'POST',
+          body: formData,
+          onUploadProgress: (progressEvent) => {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(progress);
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to upload file');
+      }
+
+      const data = await response.json();
+      return data.secure_url;
+    } catch (error) {
+      console.error('Error uploading to Cloudinary:', error);
+      throw error;
+    }
+  };
+
+  const handleAvatarUpdate = async () => {
+    if (!selectedFile) return;
+
+    try {
+      setIsUploading(true);
+      setUploadProgress(0);
+
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const imageUrl = await uploadToCloudinary(selectedFile);
+
+      // Update Firebase Auth profile
+      await updateProfile(user, {
+        photoURL: imageUrl
+      });
+
+      // Update Firestore user document
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        photoURL: imageUrl
+      });
+
+      // Update local state
+      setProfileData(prev => ({ ...prev, photoURL: imageUrl }));
+      setTempData(prev => ({ ...prev, photoURL: imageUrl }));
+      setPreviewUrl(imageUrl);
+
+      setSnackbarMessage("Profile picture updated successfully");
+      setSnackbarSeverity("success");
+      setSnackbarOpen(true);
+      setOpenAvatarDialog(false);
+    } catch (error) {
+      console.error("Error updating profile picture:", error);
+      setSnackbarMessage("Failed to update profile picture");
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
+    } finally {
+      setIsUploading(false);
+      setSelectedFile(null);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      // Update Firebase Auth profile
+      await updateProfile(user, {
+        photoURL: ""
+      });
+
+      // Update Firestore user document
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        photoURL: ""
+      });
+
+      // Update local state
+      setProfileData(prev => ({ ...prev, photoURL: "" }));
+      setTempData(prev => ({ ...prev, photoURL: "" }));
+      setPreviewUrl(null);
+
+      setSnackbarMessage("Profile picture removed");
+      setSnackbarSeverity("success");
+      setSnackbarOpen(true);
+      setOpenAvatarDialog(false);
+    } catch (error) {
+      console.error("Error removing profile picture:", error);
+      setSnackbarMessage("Failed to remove profile picture");
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
+    }
+  };
+
   if (loading) {
     return (
       <Box className="flex items-center justify-center h-screen">
@@ -282,18 +430,24 @@ const ClientProfile = () => {
             overlap="circular"
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             badgeContent={
-              <IconButton size="small" color="primary" component="label">
-                <FiEdit2 size={12} />
-                <input type="file" hidden />
-              </IconButton>
+              <Box className={`w-3 h-3 rounded-full border-2 border-white ${
+                profileData?.profileStatus === "online" ? "bg-green-500" : "bg-gray-400"
+              }`}></Box>
             }
           >
-            <Avatar
-              alt={`${profileData.firstName} ${profileData.lastName}`}
-              src={profileData.photoURL}
-              sx={{ width: 100, height: 100 }}
-              className="shadow-lg ring-2 ring-white"
-            />
+            <Box className="relative group">
+              <Avatar
+                alt={`${profileData.firstName} ${profileData.lastName}`}
+                src={previewUrl || profileData.photoURL || auth.currentUser?.photoURL}
+                sx={{ width: 100, height: 100 }}
+                className="shadow-lg ring-2 ring-white cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => setOpenAvatarDialog(true)}
+              />
+              <Box className="absolute inset-0 bg-black bg-opacity-30 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                onClick={() => setOpenAvatarDialog(true)}>
+                <FiCamera className="text-white text-xl" />
+              </Box>
+            </Box>
           </Badge>
           <Box>
             <Typography variant="h4" className="font-bold text-gray-800">
@@ -315,7 +469,6 @@ const ClientProfile = () => {
           </Box>
         </Box>
         <Box className="flex space-x-3">
-       
           <Button
             variant="contained"
             startIcon={<FiEdit2 />}
@@ -370,7 +523,6 @@ const ClientProfile = () => {
             handlePrintReceipt={handlePrintReceipt}
           />
         )}
-
 
         {/* Resources Tab */}
         {activeTab === 'resources' && (
@@ -492,6 +644,98 @@ const ClientProfile = () => {
             className="bg-indigo-600 hover:bg-indigo-700"
           >
             Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Avatar Update Dialog */}
+      <Dialog open={openAvatarDialog} onClose={() => !isUploading && setOpenAvatarDialog(false)}>
+        <DialogTitle className="flex justify-between items-center border-b border-gray-200 pb-3">
+          <Typography variant="h6" className="font-bold">
+            Update Profile Picture
+          </Typography>
+          <IconButton 
+            onClick={() => !isUploading && setOpenAvatarDialog(false)}
+            disabled={isUploading}
+          >
+            <FiX />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent className="pt-4">
+          <Box className="flex flex-col items-center">
+            <Box className="relative mb-6">
+              <Avatar
+                src={previewUrl || profileData?.photoURL}
+                sx={{ width: 120, height: 120 }}
+                className="ring-2 ring-indigo-100 shadow-md"
+              />
+              {isUploading && (
+                <CircularProgress 
+                  variant="determinate" 
+                  value={uploadProgress} 
+                  size={124}
+                  thickness={2}
+                  className="absolute -top-2 -left-2 text-indigo-500"
+                />
+              )}
+            </Box>
+
+            <input
+              accept="image/*"
+              style={{ display: 'none' }}
+              id="avatar-upload"
+              type="file"
+              onChange={handleFileChange}
+              disabled={isUploading}
+            />
+            
+            <Box className="flex gap-3 mb-4">
+              <label htmlFor="avatar-upload">
+                <Button
+                  variant="outlined"
+                  component="span"
+                  startIcon={<FiUpload />}
+                  disabled={isUploading}
+                  className="border-indigo-500 text-indigo-600 hover:border-indigo-600"
+                >
+                  Upload New
+                </Button>
+              </label>
+              
+              {(previewUrl || profileData?.photoURL) && (
+                <Button
+                  variant="outlined"
+                  startIcon={<FiTrash2 />}
+                  onClick={handleRemoveAvatar}
+                  disabled={isUploading}
+                  className="border-red-500 text-red-600 hover:border-red-600"
+                >
+                  Remove
+                </Button>
+              )}
+            </Box>
+            
+            <Typography variant="caption" className="text-gray-500 text-center">
+              Recommended size: 500x500px, Max file size: 5MB
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions className="border-t border-gray-200 p-4">
+          <Button
+            onClick={() => !isUploading && setOpenAvatarDialog(false)}
+            disabled={isUploading}
+            className="text-gray-600 hover:bg-gray-100"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAvatarUpdate}
+            disabled={!selectedFile || isUploading}
+            variant="contained"
+            className="bg-indigo-600 hover:bg-indigo-700"
+            startIcon={isUploading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {isUploading ? 'Uploading...' : 'Save Changes'}
           </Button>
         </DialogActions>
       </Dialog>

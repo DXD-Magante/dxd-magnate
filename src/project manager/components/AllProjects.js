@@ -9,18 +9,19 @@ import {
   List, ListItem, ListItemAvatar, ListItemText,
   Divider, Tooltip, Checkbox
 } from "@mui/material";
-import { collection, getDocs, updateDoc, doc, getDoc, setDoc,  } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, doc, getDoc, setDoc, query, where } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from "../../services/firebase";
 import { 
   FiSearch, FiFilter, FiDownload, FiPlus,
   FiEye, FiEdit2, FiTrash2, FiChevronDown,
-  FiUsers, FiUserPlus, FiUser, FiXCircle, 
+  FiUsers, FiUserPlus, FiUser, FiXCircle,
 } from "react-icons/fi";
 import { 
   FaRegDotCircle, 
   FaRegClock,
-  FaCheckCircle
+  FaCheckCircle,
+  FaStar, FaRegStar, FaStarHalfAlt
 } from "react-icons/fa";
 import { statusStyles, priorityStyles } from "./Constants";
 import TeamManagementDialog from "./TeamManagement";
@@ -53,6 +54,37 @@ const AllProjects = () => {
   const [projectRoles, setProjectRoles] = useState([]);
   const [newRole, setNewRole] = useState('');
   const [users, setUsers] = useState([]);
+  const [projectRatings, setProjectRatings] = useState({});
+
+  useEffect(() => {
+    const fetchRatings = async () => {
+      try {
+        const completedProjects = projects.filter(p => p.status === "Completed");
+        if (completedProjects.length === 0) return;
+  
+        const ratingsQuery = query(
+          collection(db, "project-feedback"),
+          where("projectId", "in", completedProjects.map(p => p.id))
+        );
+        const ratingsSnapshot = await getDocs(ratingsQuery);
+        
+        const ratingsData = {};
+        ratingsSnapshot.forEach(doc => {
+          const data = doc.data();
+          ratingsData[data.projectId] = data.rating;
+        });
+        
+        setProjectRatings(ratingsData);
+      } catch (error) {
+        console.error("Error fetching ratings:", error);
+      }
+    };
+  
+    if (projects.length > 0) {
+      fetchRatings();
+    }
+  }, [projects]);
+  
 
   useEffect(() => {
      const fetchProjects = async () => {
@@ -365,6 +397,31 @@ const AllProjects = () => {
     setSelectedProject(null);
   };
 
+  const renderStars = (rating) => {
+    if (!rating) return null;
+    
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+    const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
+  
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        {[...Array(fullStars)].map((_, i) => (
+          <FaStar key={`full-${i}`} style={{ color: '#f59e0b', fontSize: 14 }} />
+        ))}
+        {hasHalfStar && (
+          <FaStarHalfAlt style={{ color: '#f59e0b', fontSize: 14 }} />
+        )}
+        {[...Array(emptyStars)].map((_, i) => (
+          <FaRegStar key={`empty-${i}`} style={{ color: '#f59e0b', fontSize: 14 }} />
+        ))}
+        <Typography variant="caption" sx={{ ml: 0.5, color: '#64748b' }}>
+          ({rating.toFixed(1)})
+        </Typography>
+      </Box>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Header with Actions */}
@@ -597,6 +654,11 @@ const AllProjects = () => {
                             </Box>
                           </MenuItem>
                         </Select>
+                        {project.status === "Completed" && projectRatings[project.id] && (
+    <Box sx={{ mt: 1 }}>
+      {renderStars(projectRatings[project.id])}
+    </Box>
+  )}
                       </TableCell>
                       <TableCell>
                         <Chip

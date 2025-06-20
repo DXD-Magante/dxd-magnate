@@ -20,11 +20,15 @@ import {
   FiCreditCard, FiDatabase, FiShield, FiGlobe, FiTag
 } from "react-icons/fi";
 import { auth, db } from "../../services/firebase";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs, updateDoc } from "firebase/firestore";
 import SettingsTab from "./Sales Tabs/Settings";
 import LeadsTab from "./Sales Tabs/Lead";
 import PerformanceTab from "./Sales Tabs/Performance";
 import OverviewTab from "./Sales Tabs/Overview";
+import SkillsModal from "./Sales Tabs/SkillModal";
+import AddNewLeadModal from "../../Sales Team/components/AddLead";
+import CreateProposalModal from "../../Sales Team/components/CreateProposal"
+import ScheduleMeetingModal from "../../Sales Team/components/ScheduleMeeting"
 
 const SalesProfilePage = () => {
   const [userData, setUserData] = useState(null);
@@ -34,6 +38,8 @@ const SalesProfilePage = () => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
   const [snackbarSeverity, setSnackbarSeverity] = useState("success");
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
+  const [addLeadModalOpen, setAddLeadModalOpen] = useState(false);
   const [performanceData, setPerformanceData] = useState({
     totalLeads: 0,
     convertedLeads: 0,
@@ -50,6 +56,8 @@ const SalesProfilePage = () => {
     }
   });
   const [recentActivities, setRecentActivities] = useState([]);
+  const [createProposalModalOpen, setCreateProposalModalOpen] = useState(false);
+  const [scheduleMeetingModalOpen, setScheduleMeetingModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const [leads, setLeads] = useState([]);
   const [leadsLoading, setLeadsLoading] = useState(false);
@@ -258,6 +266,34 @@ const SalesProfilePage = () => {
     }
   };
 
+  const handleSkillsUpdate = () => {
+    setTempData(userData);
+    setSkillsModalOpen(true);
+  };
+  
+  const handleSaveSkills = async (newSkills) => {
+    try {
+      // Update in Firestore
+      const userRef = doc(db, "users", auth.currentUser.uid);
+      await updateDoc(userRef, {
+        skills: newSkills
+      });
+      
+      // Update local state
+      setUserData(prev => ({ ...prev, skills: newSkills }));
+      setTempData(prev => ({ ...prev, skills: newSkills }));
+      
+      setSnackbarMessage("Skills updated successfully");
+      setSnackbarSeverity("success");
+      setSnackbarOpen(true);
+    } catch (error) {
+      console.error("Error updating skills:", error);
+      setSnackbarMessage("Failed to update skills");
+      setSnackbarSeverity("error");
+      setSnackbarOpen(true);
+    }
+  };
+
   const handleSnackbarClose = () => {
     setSnackbarOpen(false);
   };
@@ -292,6 +328,30 @@ const SalesProfilePage = () => {
       case 'closed-lost': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
     }
+  };
+
+  const handleAddLeadOpen = () => {
+    setAddLeadModalOpen(true);
+  };
+  
+  const handleAddLeadClose = () => {
+    setAddLeadModalOpen(false);
+  };
+
+  const handleCreateProposalOpen = () => {
+    setCreateProposalModalOpen(true);
+  };
+  
+  const handleCreateProposalClose = () => {
+    setCreateProposalModalOpen(false);
+  };
+  
+  const handleScheduleMeetingOpen = () => {
+    setScheduleMeetingModalOpen(true);
+  };
+  
+  const handleScheduleMeetingClose = () => {
+    setScheduleMeetingModalOpen(false);
   };
 
   const formatDate = (date) => {
@@ -350,13 +410,7 @@ const SalesProfilePage = () => {
               <Typography variant="subtitle1" className="text-gray-600">
                 {userData.designation || "Sales Executive"}
               </Typography>
-              <Chip
-                label="Top Performer"
-                color="warning"
-                size="small"
-                icon={<FiAward size={14} />}
-                className="text-xs"
-              />
+             
             </Box>
             <Box className="flex space-x-2 mt-2">
               <Chip
@@ -441,7 +495,11 @@ const SalesProfilePage = () => {
         <OverviewTab 
           userData={userData} 
           performanceData={performanceData} 
-          recentActivities={recentActivities} 
+          recentActivities={recentActivities}
+          onSkillsUpdate={handleSkillsUpdate}
+          onAddLeadClick={handleAddLeadOpen}
+          onCreateProposalClick={handleCreateProposalOpen} 
+          onScheduleMeetingClick={handleScheduleMeetingOpen}  
         />
       )}
 
@@ -572,6 +630,28 @@ const SalesProfilePage = () => {
         </DialogActions>
       </Dialog>
 
+
+      <AddNewLeadModal 
+  open={addLeadModalOpen} 
+  onClose={handleAddLeadClose} 
+/>
+
+<CreateProposalModal
+  open={createProposalModalOpen}
+  onClose={handleCreateProposalClose}
+/>
+
+<ScheduleMeetingModal
+  open={scheduleMeetingModalOpen}
+  onClose={handleScheduleMeetingClose}
+/>
+
+      <SkillsModal
+  open={skillsModalOpen}
+  onClose={() => setSkillsModalOpen(false)}
+  currentSkills={userData.skills || []}
+  onSave={handleSaveSkills}
+/>
       {/* Snackbar */}
       <Snackbar
         open={snackbarOpen}

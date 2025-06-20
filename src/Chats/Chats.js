@@ -11,11 +11,12 @@ import ConfirmDialog from './components/ConfirmDialog';
 import ChatMenu from './components/ChatMenu';
 import useUnreadChatCount from './components/UnReadCount';
 import { FiMessageSquare } from 'react-icons/fi';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 
 const ChatPage = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);

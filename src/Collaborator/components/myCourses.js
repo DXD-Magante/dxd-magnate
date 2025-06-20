@@ -1,39 +1,46 @@
 import React, { useState, useEffect } from "react";
 import { 
   Box, Typography, Card, CardContent, Grid, 
-  LinearProgress, Avatar, Chip, Button, Badge,
-  Tabs, Tab, Divider, IconButton, Tooltip, TextField, 
+  LinearProgress, Chip, Button, Badge,
+  Tabs, Tab, TextField, FormControl, 
+  InputLabel, Select, MenuItem, Paper, Stack, Tooltip
 } from "@mui/material";
 import { 
-  FiBook, FiClock, FiUsers, FiAward, FiSearch,
-  FiChevronRight, FiPlay, FiFileText, FiLink,
-  FiBarChart2, FiMessageSquare, FiStar
+  FiBook, FiClock, FiUsers, FiSearch,
+  FiChevronRight, FiCheckCircle, FiFilter,
+  FiAward
 } from "react-icons/fi";
 import { styled } from "@mui/material/styles";
 import { auth, db } from "../../services/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { 
+  collection, getDocs, query, where, 
+  doc, updateDoc, arrayUnion, addDoc 
+} from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 
 const StyledCourseCard = styled(Card)(({ theme }) => ({
-  borderRadius: '12px',
+  borderRadius: '16px',
   transition: 'all 0.3s ease',
+  boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+  border: '1px solid rgba(0,0,0,0.05)',
   '&:hover': {
-    transform: 'translateY(-5px)',
-    boxShadow: theme.shadows[8],
+    transform: 'translateY(-8px)',
+    boxShadow: '0 8px 30px rgba(0,0,0,0.1)',
     '& .course-cta': {
-      backgroundColor: theme.palette.primary.main,
-      color: 'white'
+      background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
+      color: 'white',
+      boxShadow: '0 4px 15px rgba(63, 81, 181, 0.3)'
     }
   }
 }));
 
 const ProgressBar = styled(LinearProgress)(({ theme }) => ({
-  height: 6,
-  borderRadius: 3,
-  backgroundColor: theme.palette.grey[200],
+  height: 8,
+  borderRadius: 4,
+  backgroundColor: theme.palette.grey[100],
   '& .MuiLinearProgress-bar': {
-    borderRadius: 3,
-    backgroundColor: theme.palette.success.main
+    borderRadius: 4,
+    background: `linear-gradient(90deg, ${theme.palette.primary.light}, ${theme.palette.primary.main})`
   }
 }));
 
@@ -42,54 +49,108 @@ const MyCourses = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('in-progress');
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortOption, setSortOption] = useState('recent');
+  const [userDepartment, setUserDepartment] = useState('');
+  const [userRole, setUserRole] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchCourses = async () => {
+    const fetchUserAndCourses = async () => {
       try {
         const user = auth.currentUser;
         if (!user) return;
 
-        // First get user's department
+        // Get current user's data
         const userQuery = query(collection(db, "users"), where("uid", "==", user.uid));
         const userSnapshot = await getDocs(userQuery);
-        const userData = userSnapshot.docs[0]?.data();
-        const userDepartment = userData?.department;
-        const userRole = userData?.role;
+        
+        if (userSnapshot.empty) {
+          setLoading(false);
+          return;
+        }
 
-        if (!userDepartment) return;
+        const userData = userSnapshot.docs[0].data();
+        setUserDepartment(userData.department || '');
+        setUserRole(userData.role || '');
 
         // Fetch courses that match user's department or are visible to their role
         const coursesQuery = query(
           collection(db, "courses"),
-          where("department", "==", userDepartment)
+          where("department", "==", userData.department)
         );
         
-        const allCoursesSnapshot = await getDocs(collection(db, "courses"));
-        const coursesData = allCoursesSnapshot.docs
-          .filter(doc => {
-            const course = doc.data();
-            return (
-              course.department === userDepartment || 
-              (course.visibleTo && course.visibleTo.includes(userRole))
-            );
-          })
-          .map(doc => ({
+        const coursesSnapshot = await getDocs(coursesQuery);
+        const coursesData = [];
+
+        // Fetch progress for each course
+        for (const doc of coursesSnapshot.docs) {
+          const course = doc.data();
+          const progressQuery = query(
+            collection(db, "course-progress"),
+            where("courseId", "==", doc.id),
+            where("userId", "==", user.uid)
+          );
+          const progressSnapshot = await getDocs(progressQuery);
+          
+          let progress = 0;
+          if (!progressSnapshot.empty) {
+            progress = progressSnapshot.docs[0].data().progress || 0;
+          }
+
+          coursesData.push({
             id: doc.id,
-            ...doc.data(),
-            progress: Math.floor(Math.random() * 100) // Mock progress for now
-          }));
+            ...course,
+            progress,
+            isMember: course.members?.includes(user.uid) || false
+          });
+        }
 
         setCourses(coursesData);
         setLoading(false);
       } catch (error) {
-        console.error("Error fetching courses:", error);
+        console.error("Error fetching data:", error);
         setLoading(false);
       }
     };
 
-    fetchCourses();
+    fetchUserAndCourses();
   }, []);
+
+  const handleStartLearning = async (courseId) => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      // Update the course members array
+      const courseRef = doc(db, "courses", courseId);
+      await updateDoc(courseRef, {
+        members: arrayUnion(user.uid),
+        lastAccessed: new Date()
+      });
+
+      // Create initial progress record if it doesn't exist
+      const progressQuery = query(
+        collection(db, "course-progress"),
+        where("courseId", "==", courseId),
+        where("userId", "==", user.uid)
+      );
+      const progressSnapshot = await getDocs(progressQuery);
+
+      if (progressSnapshot.empty) {
+        await addDoc(collection(db, "course-progress"), {
+          courseId,
+          userId: user.uid,
+          progress: 0,
+          lastUpdated: new Date(),
+          completed: false
+        });
+      }
+
+      navigate(`/courses/${courseId}`);
+    } catch (error) {
+      console.error("Error starting course:", error);
+    }
+  };
 
   const filteredCourses = courses.filter(course => {
     const matchesSearch = 
@@ -105,221 +166,265 @@ const MyCourses = () => {
     return matchesSearch && matchesTab;
   });
 
-  const handleViewCourse = (courseId) => {
-    navigate(`/courses/${courseId}`);
-  };
+  const sortedCourses = [...filteredCourses].sort((a, b) => {
+    switch (sortOption) {
+      case 'recent':
+        return new Date(b.updatedAt?.toDate() || 0) - new Date(a.updatedAt?.toDate() || 0);
+      case 'progress-asc':
+        return a.progress - b.progress;
+      case 'progress-desc':
+        return b.progress - a.progress;
+      case 'duration-asc':
+        return parseInt(a.estimatedDuration) - parseInt(b.estimatedDuration);
+      case 'duration-desc':
+        return parseInt(b.estimatedDuration) - parseInt(a.estimatedDuration);
+      default:
+        return 0;
+    }
+  });
 
   return (
-    <Box sx={{ flexGrow: 1 }}>
+    <Box sx={{ flexGrow: 1, p: 3 }}>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h5" sx={{ 
-          fontWeight: 'bold', 
+        <Typography variant="h4" sx={{ 
+          fontWeight: '700', 
           mb: 1,
           display: 'flex',
           alignItems: 'center',
-          gap: 1.5
+          gap: 2,
+          color: 'text.primary'
         }}>
-          <FiBook size={26} /> My Courses
+          <Box sx={{
+            width: 48,
+            height: 48,
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, #3f51b5, #2196f3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white'
+          }}>
+            <FiBook size={24} />
+          </Box>
+          My Courses
         </Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+        <Typography variant="body1" sx={{ color: 'text.secondary', maxWidth: '600px' }}>
           {courses.length > 0 
-            ? `You have ${courses.length} courses assigned to you` 
-            : 'No courses assigned yet'}
+            ? `You have ${courses.length} courses in your ${userDepartment} learning path.` 
+            : 'No courses available for your department yet.'}
         </Typography>
       </Box>
 
-      {/* Tabs and Search */}
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        mb: 3,
-        flexWrap: 'wrap',
-        gap: 2
+      {/* Filters and Search */}
+      <Paper elevation={0} sx={{ 
+        p: 3, 
+        mb: 4, 
+        borderRadius: '16px',
+        background: 'rgba(245, 245, 245, 0.5)',
+        backdropFilter: 'blur(8px)'
       }}>
-        <Tabs
-          value={activeTab}
-          onChange={(e, newValue) => setActiveTab(newValue)}
-          sx={{
-            '& .MuiTabs-indicator': {
-              backgroundColor: 'primary.main',
-              height: 3
-            }
-          }}
-        >
-          <Tab 
-            value="all" 
-            label="All Courses"
-            iconPosition="start"
-            sx={{ minHeight: 48 }}
-          />
-          <Tab 
-            value="in-progress" 
-            label="In Progress"
-            iconPosition="start"
-            sx={{ minHeight: 48 }}
-          />
-          <Tab 
-            value="completed" 
-            label="Completed"
-            iconPosition="start"
-            sx={{ minHeight: 48 }}
-          />
-        </Tabs>
-
-        <TextField
-          size="small"
-          placeholder="Search courses..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <FiSearch style={{ marginRight: 8, color: 'text.secondary' }} />
-            ),
-          }}
-          sx={{ width: 300 }}
-        />
-      </Box>
+        <Grid container spacing={3} alignItems="center">
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              size="medium"
+              placeholder="Search courses..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <FiSearch style={{ marginRight: 12, color: 'text.secondary' }} />
+                ),
+                sx: { borderRadius: '12px', background: 'white' }
+              }}
+            />
+          </Grid>
+          
+          <Grid item xs={12} md={6}>
+            <Stack direction="row" spacing={2} justifyContent="flex-end">
+              <FormControl size="small" sx={{ minWidth: 180 }}>
+                <InputLabel>Sort by</InputLabel>
+                <Select
+                  value={sortOption}
+                  onChange={(e) => setSortOption(e.target.value)}
+                  label="Sort by"
+                  sx={{ borderRadius: '12px', background: 'white' }}
+                >
+                  <MenuItem value="recent">Recently Updated</MenuItem>
+                  <MenuItem value="progress-asc">Progress (Low to High)</MenuItem>
+                  <MenuItem value="progress-desc">Progress (High to Low)</MenuItem>
+                  <MenuItem value="duration-asc">Duration (Short to Long)</MenuItem>
+                  <MenuItem value="duration-desc">Duration (Long to Short)</MenuItem>
+                </Select>
+              </FormControl>
+              
+              <Tabs
+                value={activeTab}
+                onChange={(e, newValue) => setActiveTab(newValue)}
+                sx={{
+                  '& .MuiTabs-indicator': {
+                    backgroundColor: 'primary.main',
+                    height: 3,
+                    borderRadius: '3px 3px 0 0'
+                  }
+                }}
+              >
+                <Tab 
+                  value="all" 
+                  label="All Courses"
+                  sx={{ minHeight: 48, fontSize: '0.875rem', fontWeight: 600 }}
+                />
+                <Tab 
+                  value="in-progress" 
+                  label="In Progress"
+                  sx={{ minHeight: 48, fontSize: '0.875rem', fontWeight: 600 }}
+                />
+                <Tab 
+                  value="completed" 
+                  label="Completed"
+                  sx={{ minHeight: 48, fontSize: '0.875rem', fontWeight: 600 }}
+                />
+              </Tabs>
+            </Stack>
+          </Grid>
+        </Grid>
+      </Paper>
 
       {/* Courses Grid */}
       {loading ? (
         <LinearProgress sx={{ my: 3 }} />
-      ) : filteredCourses.length === 0 ? (
-        <Card sx={{ 
+      ) : sortedCourses.length === 0 ? (
+        <Paper sx={{ 
           textAlign: 'center', 
           p: 6,
+          borderRadius: '16px',
           boxShadow: 'none',
-          border: '1px solid',
-          borderColor: 'divider',
-          borderRadius: '12px'
+          background: 'rgba(245, 245, 245, 0.5)'
         }}>
           <Box sx={{
-            width: 80,
-            height: 80,
+            width: 100,
+            height: 100,
             borderRadius: '50%',
-            backgroundColor: 'action.hover',
+            background: 'linear-gradient(135deg, rgba(63, 81, 181, 0.1), rgba(33, 150, 243, 0.1))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 24px',
           }}>
-            <FiBook size={36} color="text.secondary" />
+            <FiBook size={48} color="#3f51b5" />
           </Box>
-          <Typography variant="h6" sx={{ fontWeight: '600', mb: 1 }}>
+          <Typography variant="h5" sx={{ fontWeight: '600', mb: 1 }}>
             No courses found
           </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+          <Typography variant="body1" sx={{ color: 'text.secondary', mb: 3 }}>
             {searchTerm 
               ? 'No courses match your search criteria' 
-              : 'You have no courses assigned to you yet'}
+              : `No courses available for ${userDepartment} department yet`}
           </Typography>
-        </Card>
+        </Paper>
       ) : (
         <Grid container spacing={3}>
-          {filteredCourses.map((course) => (
-            <Grid item xs={12} sm={6} md={4} key={course.id}>
+          {sortedCourses.map((course) => (
+            <Grid item xs={12} sm={6} md={4} lg={3} key={course.id}>
               <StyledCourseCard>
                 <CardContent sx={{ p: 0 }}>
                   {/* Course Thumbnail */}
                   <Box sx={{
-                    height: 160,
-                    backgroundColor: 'grey.100',
-                    backgroundImage: `url(https://source.unsplash.com/random/400x300/?${course.title.split(' ')[0]})`,
+                    height: 180,
+                    backgroundImage: `linear-gradient(rgba(0,0,0,0.2), rgba(0,0,0,0.2)), url(https://source.unsplash.com/random/600x400/?${course.title.split(' ')[0]})`,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
                     position: 'relative',
-                    borderRadius: '12px 12px 0 0'
+                    borderRadius: '16px 16px 0 0',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    p: 2
                   }}>
-                    <Badge
-                      badgeContent={course.status === 'Published' ? 'Active' : 'Draft'}
-                      color={course.status === 'Published' ? 'success' : 'warning'}
-                      sx={{
-                        position: 'absolute',
-                        top: 12,
-                        left: 12,
-                        '& .MuiBadge-badge': {
-                          fontWeight: 600,
-                          fontSize: '0.65rem'
-                        }
-                      }}
-                    />
-                  </Box>
-
-                  {/* Course Content */}
-                  <Box sx={{ p: 2.5 }}>
                     <Box sx={{ 
                       display: 'flex', 
                       justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      mb: 1.5
+                      alignItems: 'flex-start'
                     }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: '600' }}>
-                        {course.title}
-                      </Typography>
                       <Chip 
                         label={course.level} 
                         size="small" 
                         color="primary"
-                        variant="outlined"
-                        sx={{ fontWeight: 500 }}
+                        variant="filled"
+                        sx={{ 
+                          fontWeight: 600,
+                          background: 'rgba(255,255,255,0.9)',
+                          color: 'primary.dark'
+                        }}
                       />
+                      {course.allowCertificate && (
+                        <Tooltip title="Certificate available">
+                          <Box sx={{
+                            backgroundColor: 'rgba(255,255,255,0.9)',
+                            borderRadius: '50%',
+                            width: 28,
+                            height: 28,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <FiAward size={16} color="#3f51b5" />
+                          </Box>
+                        </Tooltip>
+                      )}
                     </Box>
+                    
+                    <Box>
+                      <Typography variant="subtitle1" sx={{ 
+                        fontWeight: '700', 
+                        color: 'white',
+                        textShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                      }}>
+                        {course.title}
+                      </Typography>
+                    </Box>
+                  </Box>
 
+                  {/* Course Content */}
+                  <Box sx={{ p: 3 }}>
                     <Typography variant="body2" sx={{ 
                       color: 'text.secondary',
                       mb: 2,
                       display: '-webkit-box',
-                      WebkitLineClamp: 2,
+                      WebkitLineClamp: 3,
                       WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden'
+                      overflow: 'hidden',
+                      minHeight: 60
                     }}>
                       {course.description}
                     </Typography>
 
                     <Box sx={{ mb: 2 }}>
-                      {course.tags?.slice(0, 3).map((tag, index) => (
+                      {course.tags?.slice(0, 4).map((tag, index) => (
                         <Chip
                           key={index}
                           label={tag}
                           size="small"
                           sx={{ 
-                            mr: 0.5, 
-                            mb: 0.5,
+                            mr: 1, 
+                            mb: 1,
                             backgroundColor: 'primary.light',
-                            color: 'primary.dark'
+                            color: 'primary.dark',
+                            fontWeight: 500,
+                            fontSize: '0.7rem'
                           }}
                         />
                       ))}
                     </Box>
 
-                    <Box sx={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      mb: 2
-                    }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <FiClock size={14} color="text.secondary" />
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                          {course.estimatedDuration || 'N/A'}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <FiUsers size={14} color="text.secondary" />
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                          {course.visibleTo?.join(', ') || 'All'}
-                        </Typography>
-                      </Box>
-                    </Box>
-
                     {/* Progress Bar */}
-                    <Box sx={{ mb: 2 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                        <Typography variant="caption" sx={{ fontWeight: '500' }}>
-                          Progress
+                    <Box sx={{ mb: 3 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: '600' }}>
+                          Your Progress
                         </Typography>
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                           {course.progress}%
                         </Typography>
                       </Box>
@@ -328,18 +433,30 @@ const MyCourses = () => {
 
                     <Button
                       fullWidth
-                      variant="outlined"
-                      endIcon={<FiChevronRight />}
-                      onClick={() => handleViewCourse(course.id)}
+                      variant={course.progress === 0 ? "contained" : "outlined"}
+                      endIcon={course.progress === 100 ? <FiCheckCircle /> : <FiChevronRight />}
+                      onClick={() => course.isMember 
+                        ? navigate(`/courses/${course.id}`) 
+                        : handleStartLearning(course.id)}
                       className="course-cta"
                       sx={{
-                        borderRadius: '8px',
+                        borderRadius: '12px',
                         textTransform: 'none',
                         fontWeight: '600',
-                        transition: 'all 0.3s ease'
+                        py: 1.5,
+                        ...(course.progress === 100 && {
+                          backgroundColor: 'success.light',
+                          color: 'success.dark',
+                          '&:hover': {
+                            backgroundColor: 'success.main',
+                            color: 'white'
+                          }
+                        })
                       }}
                     >
-                      {course.progress === 0 ? 'Start Course' : 'Continue'}
+                      {!course.isMember ? 'Start Learning' :
+                       course.progress === 0 ? 'Start Learning' : 
+                       course.progress === 100 ? 'Completed' : 'Continue'}
                     </Button>
                   </Box>
                 </CardContent>

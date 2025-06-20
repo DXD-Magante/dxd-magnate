@@ -17,7 +17,13 @@ import {
   Snackbar,
   Alert,
   CircularProgress,
-  InputAdornment
+  InputAdornment,
+  Dialog,
+  DialogActions,
+  DialogContent, 
+  DialogTitle,
+  DialogContentText,
+
 } from "@mui/material";
 import {
   FiUser,
@@ -35,12 +41,19 @@ import {
   FiEyeOff,
   FiShield,
   FiBell,
-  FiCreditCard
+  FiCreditCard, 
+  FiCamera,
+  FiTrash2
 } from "react-icons/fi";
 import { auth, db } from "../../services/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
+import { updatePassword, reauthenticateWithCredential, EmailAuthProvider, updateProfile } from "firebase/auth";
 
+const CLOUDINARY_CONFIG = {
+  cloudName: 'dsbt1j73t',
+  uploadPreset: 'dxd-magnate',
+  apiKey: '753871594898224'
+};
 const ProfileSettings = () => {
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +71,11 @@ const ProfileSettings = () => {
     new: false,
     confirm: false
   });
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [openAvatarDialog, setOpenAvatarDialog] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -72,6 +90,7 @@ const ProfileSettings = () => {
           const data = userSnap.data();
           setUserData(data);
           setTempData(data);
+          setPreviewUrl(data.profilePicture || user.photoURL);
         }
         setLoading(false);
       } catch (error) {
@@ -109,6 +128,129 @@ const ProfileSettings = () => {
       ...prev,
       [field]: !prev[field]
     }));
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Check if file is an image
+    if (!file.type.match('image.*')) {
+      setSnackbar({ open: true, message: "Please select an image file", severity: "error" });
+      return;
+    }
+
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setSnackbar({ open: true, message: "File size should be less than 5MB", severity: "error" });
+      return;
+    }
+
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const uploadToCloudinary = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset);
+    formData.append('cloud_name', CLOUDINARY_CONFIG.cloudName);
+
+    try {
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloudName}/upload`,
+        {
+          method: 'POST',
+          body: formData,
+          onUploadProgress: (progressEvent) => {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(progress);
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to upload file');
+      }
+
+      const data = await response.json();
+      return data.secure_url;
+    } catch (error) {
+      console.error('Error uploading to Cloudinary:', error);
+      throw error;
+    }
+  };
+
+  const handleAvatarUpdate = async () => {
+    if (!selectedFile) return;
+
+    try {
+      setIsUploading(true);
+      setUploadProgress(0);
+
+      const user = auth.currentUser;
+      if (!user) return;
+
+      // Upload to Cloudinary
+      const imageUrl = await uploadToCloudinary(selectedFile);
+
+      // Update Firebase Auth profile
+      await updateProfile(user, {
+        photoURL: imageUrl
+      });
+
+      // Update Firestore user document
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        profilePicture: imageUrl
+      });
+
+      // Update local state
+      setUserData(prev => ({ ...prev, profilePicture: imageUrl }));
+      setTempData(prev => ({ ...prev, profilePicture: imageUrl }));
+      setPreviewUrl(imageUrl);
+
+      setSnackbar({ open: true, message: "Profile picture updated successfully", severity: "success" });
+      setOpenAvatarDialog(false);
+    } catch (error) {
+      console.error("Error updating profile picture:", error);
+      setSnackbar({ open: true, message: "Failed to update profile picture", severity: "error" });
+    } finally {
+      setIsUploading(false);
+      setSelectedFile(null);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      // Update Firebase Auth profile
+      await updateProfile(user, {
+        photoURL: ""
+      });
+
+      // Update Firestore user document
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, {
+        profilePicture: ""
+      });
+
+      // Update local state
+      setUserData(prev => ({ ...prev, profilePicture: "" }));
+      setTempData(prev => ({ ...prev, profilePicture: "" }));
+      setPreviewUrl(null);
+
+      setSnackbar({ open: true, message: "Profile picture removed", severity: "success" });
+      setOpenAvatarDialog(false);
+    } catch (error) {
+      console.error("Error removing profile picture:", error);
+      setSnackbar({ open: true, message: "Failed to remove profile picture", severity: "error" });
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -204,21 +346,28 @@ const ProfileSettings = () => {
       {/* Header Section */}
       <Box className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8">
         <Box className="flex items-center space-x-4 mb-4 md:mb-0">
-          <Badge
+        <Badge
             overlap="circular"
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             badgeContent={
               <Box className={`w-3 h-3 rounded-full border-2 border-white ${
-                userData.profileStatus === "online" ? "bg-green-500" : "bg-gray-400"
+                userData?.profileStatus === "online" ? "bg-green-500" : "bg-gray-400"
               }`}></Box>
             }
           >
-            <Avatar
-              alt={`${userData.firstName} ${userData.lastName}`}
-              src={userData.profilePicture}
-              sx={{ width: 80, height: 80 }}
-              className="shadow-lg ring-2 ring-white"
-            />
+            <Box className="relative group">
+              <Avatar
+                alt={`${userData?.firstName} ${userData?.lastName}`}
+                src={previewUrl}
+                sx={{ width: 80, height: 80 }}
+                className="shadow-lg ring-2 ring-white cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => setOpenAvatarDialog(true)}
+              />
+              <Box className="absolute inset-0 bg-black bg-opacity-30 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                onClick={() => setOpenAvatarDialog(true)}>
+                <FiCamera className="text-white text-xl" />
+              </Box>
+            </Box>
           </Badge>
           <Box>
             <Typography variant="h4" className="font-bold text-gray-800">
@@ -548,6 +697,97 @@ const ProfileSettings = () => {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      <Dialog open={openAvatarDialog} onClose={() => !isUploading && setOpenAvatarDialog(false)}>
+        <DialogTitle className="flex justify-between items-center border-b border-gray-200 pb-3">
+          <Typography variant="h6" className="font-bold">
+            Update Profile Picture
+          </Typography>
+          <IconButton 
+            onClick={() => !isUploading && setOpenAvatarDialog(false)}
+            disabled={isUploading}
+          >
+            <FiX />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent className="pt-4">
+          <Box className="flex flex-col items-center">
+            <Box className="relative mb-6">
+              <Avatar
+                src={previewUrl}
+                sx={{ width: 120, height: 120 }}
+                className="ring-2 ring-indigo-100 shadow-md"
+              />
+              {isUploading && (
+                <CircularProgress 
+                  variant="determinate" 
+                  value={uploadProgress} 
+                  size={124}
+                  thickness={2}
+                  className="absolute -top-2 -left-2 text-indigo-500"
+                />
+              )}
+            </Box>
+
+            <input
+              accept="image/*"
+              style={{ display: 'none' }}
+              id="avatar-upload"
+              type="file"
+              onChange={handleFileChange}
+              disabled={isUploading}
+            />
+            
+            <Box className="flex gap-3 mb-4">
+              <label htmlFor="avatar-upload">
+                <Button
+                  variant="outlined"
+                  component="span"
+                  startIcon={<FiUpload />}
+                  disabled={isUploading}
+                  className="border-indigo-500 text-indigo-600 hover:border-indigo-600"
+                >
+                  Upload New
+                </Button>
+              </label>
+              
+              {previewUrl && (
+                <Button
+                  variant="outlined"
+                  startIcon={<FiTrash2 />}
+                  onClick={handleRemoveAvatar}
+                  disabled={isUploading}
+                  className="border-red-500 text-red-600 hover:border-red-600"
+                >
+                  Remove
+                </Button>
+              )}
+            </Box>
+            
+            <Typography variant="caption" className="text-gray-500 text-center">
+              Recommended size: 500x500px, Max file size: 5MB
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions className="border-t border-gray-200 p-4">
+          <Button
+            onClick={() => !isUploading && setOpenAvatarDialog(false)}
+            disabled={isUploading}
+            className="text-gray-600 hover:bg-gray-100"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAvatarUpdate}
+            disabled={!selectedFile || isUploading}
+            variant="contained"
+            className="bg-indigo-600 hover:bg-indigo-700"
+            startIcon={isUploading ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {isUploading ? 'Uploading...' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

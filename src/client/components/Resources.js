@@ -57,7 +57,7 @@ import {
 import { collection, getDocs, query, where, doc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../../services/firebase";
 import { styled } from "@mui/material/styles";
-import { loadGapiInsideDOM } from "gapi-script";
+import { createClient } from '@supabase/supabase-js';
 
 // Cloudinary configuration
 const CLOUDINARY_CONFIG = {
@@ -66,10 +66,14 @@ const CLOUDINARY_CONFIG = {
   apiKey: '753871594898224'
 };
 
-// Google Drive API configuration (for non-media files)
-const GOOGLE_API_KEY = "AIzaSyB8gbDwWVrFwt7jIRV-XFybwdyFGUB_8vE";
-const GOOGLE_CLIENT_ID = "778430544439-37a6j5s493pmg21r4u3ndrh83hhidk7q.apps.googleusercontent.com";
-const GOOGLE_FOLDER_ID = "1BG6ZvJosRWgyGTk7wUVZlgKtXUxs51CS";
+// Supabase configuration
+const SUPABASE_CONFIG = {
+  bucket: 'dxdmagnatedocs',
+  url: 'https://bpwolooauknqwgcefpra.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwd29sb29hdWtucXdnY2VmcHJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDcxOTQ2MTQsImV4cCI6MjA2Mjc3MDYxNH0.UpUUZsOUyqmIrD97_2H5tf9xWr0TdLvFEw_ZtZ7fDm8'
+};
+
+const supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
 
 // File type icons mapping
 const FILE_ICONS = {
@@ -153,31 +157,7 @@ const Resources = () => {
   });
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
-  const [gapiLoaded, setGapiLoaded] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
-
-  // Initialize Google API
-  useEffect(() => {
-    const loadGoogleAPI = async () => {
-      try {
-        await loadGapiInsideDOM();
-        window.gapi.load('client:auth2:picker', async () => {
-          await window.gapi.client.init({
-            apiKey: GOOGLE_API_KEY,
-            clientId: GOOGLE_CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/drive.file',
-            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
-          });
-          setGapiLoaded(true);
-        });
-      } catch (error) {
-        console.error('Error loading Google API:', error);
-        setSnackbar({ open: true, message: 'Failed to load Google Drive integration', severity: 'error' });
-      }
-    };
-
-    loadGoogleAPI();
-  }, []);
 
   // Fetch projects
   useEffect(() => {
@@ -293,6 +273,33 @@ const Resources = () => {
     }
   };
 
+  const uploadToSupabase = async (file) => {
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
+      
+      const { data, error } = await supabase.storage
+        .from(SUPABASE_CONFIG.bucket)
+        .upload(`documents/${fileName}`, file);
+
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from(SUPABASE_CONFIG.bucket)
+        .getPublicUrl(`documents/${fileName}`);
+
+      return {
+        url: publicUrl,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size
+      };
+    } catch (error) {
+      console.error('Error uploading to Supabase:', error);
+      throw error;
+    }
+  };
+
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -308,8 +315,33 @@ const Resources = () => {
         type: 'file'
       }));
     } else {
-      // For non-media files, use Google Drive
-      handleGoogleDriveUpload();
+      // For non-media files, use Supabase
+      handleSupabaseUpload(file);
+    }
+  };
+
+  const handleSupabaseUpload = async (file) => {
+    try {
+      setIsUploading(true);
+      setUploadProgress(0);
+      
+      const uploadedFile = await uploadToSupabase(file);
+      
+      setNewResource(prev => ({
+        ...prev,
+        file: null,
+        url: uploadedFile.url,
+        fileName: uploadedFile.fileName,
+        fileType: uploadedFile.fileType,
+        fileSize: uploadedFile.fileSize,
+        type: 'file',
+        title: uploadedFile.fileName
+      }));
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to upload document', severity: 'error' });
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -345,14 +377,13 @@ const Resources = () => {
           resourceData.fileSize = uploadedFile.bytes;
           resourceData.storageType = 'cloudinary';
           resourceData.publicId = uploadedFile.publicId;
-        } else if (newResource.fileId) {
-          // This is for Google Drive files
-          resourceData.fileId = newResource.fileId;
+        } else if (newResource.url) {
+          // This is for Supabase files
+          resourceData.fileUrl = newResource.url;
           resourceData.fileName = newResource.fileName;
           resourceData.fileType = newResource.fileType;
           resourceData.fileSize = newResource.fileSize;
-          resourceData.fileUrl = newResource.fileUrl;
-          resourceData.storageType = 'google-drive';
+          resourceData.storageType = 'supabase';
         }
       }
 
@@ -379,57 +410,32 @@ const Resources = () => {
     }
   };
 
-  const handleGoogleDriveUpload = () => {
-    if (!gapiLoaded) {
-      setSnackbar({ open: true, message: 'Google Drive integration not ready', severity: 'error' });
-      return;
-    }
-
-    const token = window.gapi.auth.getToken().access_token;
-    const uploadView = new window.google.picker.DocsUploadView()
-      .setParent(GOOGLE_FOLDER_ID)
-      .setIncludeFolders(true);
-
-    const picker = new window.google.picker.PickerBuilder()
-      .addView(uploadView)
-      .setOAuthToken(token)
-      .setDeveloperKey(GOOGLE_API_KEY)
-      .setCallback(pickerCallback)
-      .build();
+  const getFileIcon = (mimeType) => {
+    if (!mimeType) return FILE_ICONS.default;
     
-    picker.setVisible(true);
+    const [type] = mimeType.split('/');
+    if (FILE_ICONS[type]) return FILE_ICONS[type];
+    if (mimeType === 'application/pdf') return FILE_ICONS.pdf;
+    
+    return FILE_ICONS.default;
   };
 
-  const pickerCallback = async (data) => {
-    if (data.action === window.google.picker.Action.PICKED) {
-      const file = data.docs[0];
-      setIsUploading(true);
-      setUploadProgress(0);
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+    return `${(bytes / 1073741824).toFixed(1)} GB`;
+  };
 
-      try {
-        // Get file metadata
-        const response = await window.gapi.client.drive.files.get({
-          fileId: file.id,
-          fields: 'name,mimeType,size,webContentLink'
-        });
+  const formatDate = (date) => {
+    if (!date) return "No date specified";
+    const options = { year: 'numeric', month: 'short', day: 'numeric' };
+    return new Date(date).toLocaleDateString(undefined, options);
+  };
 
-        const fileData = response.result;
-        setNewResource(prev => ({
-          ...prev,
-          fileId: file.id,
-          fileName: fileData.name,
-          fileType: fileData.mimeType,
-          fileSize: fileData.size,
-          fileUrl: fileData.webContentLink,
-          title: fileData.name
-        }));
-      } catch (error) {
-        console.error("Error getting file metadata:", error);
-        setSnackbar({ open: true, message: 'Failed to get file details', severity: 'error' });
-      } finally {
-        setIsUploading(false);
-      }
-    }
+  const handleCloseSnackbar = () => {
+    setSnackbar(prev => ({ ...prev, open: false }));
   };
 
   const renderFileUploadSection = () => {
@@ -478,8 +484,8 @@ const Resources = () => {
           </Button>
         </Box>
       );
-    } else if (newResource.fileId) {
-      // Google Drive file selected
+    } else if (newResource.url) {
+      // Supabase file selected
       return (
         <Box sx={{ 
           border: '1px dashed',
@@ -505,7 +511,13 @@ const Resources = () => {
             </Box>
             <IconButton 
               size="small" 
-              onClick={() => setNewResource(prev => ({ ...prev, fileId: null, fileName: '', fileType: '' }))}
+              onClick={() => setNewResource(prev => ({ 
+                ...prev, 
+                url: '', 
+                fileName: '', 
+                fileType: '',
+                fileSize: 0
+              }))}
             >
               <FiX size={16} />
             </IconButton>
@@ -525,7 +537,7 @@ const Resources = () => {
         }}>
           <FiUpload size={32} style={{ marginBottom: 16, color: 'text.secondary' }} />
           <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-            Upload files (images/videos to Cloudinary, other files to Google Drive)
+            Upload files (images/videos to Cloudinary, other files to Supabase)
           </Typography>
           
           <input
@@ -547,45 +559,26 @@ const Resources = () => {
             </Button>
           </label>
           
-          <Button
-            variant="outlined"
-            startIcon={<FiUpload size={16} />}
-            onClick={handleGoogleDriveUpload}
-            disabled={!gapiLoaded || isUploading}
-          >
-            Select from Drive
-          </Button>
+          <input
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
+            style={{ display: 'none' }}
+            id="supabase-upload"
+            type="file"
+            onChange={handleFileChange}
+          />
+          
+          <label htmlFor="supabase-upload">
+            <Button
+              variant="outlined"
+              component="span"
+              startIcon={<FiUpload size={16} />}
+            >
+              Upload Document
+            </Button>
+          </label>
         </Box>
       );
     }
-  };
-
-  const getFileIcon = (mimeType) => {
-    if (!mimeType) return FILE_ICONS.default;
-    
-    const [type] = mimeType.split('/');
-    if (FILE_ICONS[type]) return FILE_ICONS[type];
-    if (mimeType === 'application/pdf') return FILE_ICONS.pdf;
-    
-    return FILE_ICONS.default;
-  };
-
-  const formatFileSize = (bytes) => {
-    if (!bytes) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
-    return `${(bytes / 1073741824).toFixed(1)} GB`;
-  };
-
-  const formatDate = (date) => {
-    if (!date) return "No date specified";
-    const options = { year: 'numeric', month: 'short', day: 'numeric' };
-    return new Date(date).toLocaleDateString(undefined, options);
-  };
-
-  const handleCloseSnackbar = () => {
-    setSnackbar(prev => ({ ...prev, open: false }));
   };
 
   return (
@@ -901,6 +894,16 @@ const Resources = () => {
                           </Typography>
                           <Typography variant="caption" sx={{ fontWeight: '500' }}>
                             Cloudinary
+                          </Typography>
+                        </Box>
+                      )}
+                      {resource.storageType === 'supabase' && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            Storage:
+                          </Typography>
+                          <Typography variant="caption" sx={{ fontWeight: '500' }}>
+                            Supabase
                           </Typography>
                         </Box>
                       )}

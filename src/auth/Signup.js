@@ -15,7 +15,9 @@ import {
   OutlinedInput,
   FormHelperText,
   Select,
-  MenuItem
+  MenuItem,
+  Chip,
+  Autocomplete
 } from "@mui/material";
 import { 
   FaEye, 
@@ -25,7 +27,12 @@ import {
   FaPhone,
   FaLock,
   FaUserTie,
-  FaUserCircle
+  FaUserCircle,
+  FaUserShield,
+  FaUserGraduate,
+  FaBullhorn,
+  FaTools,
+  FaBuilding
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
@@ -38,12 +45,45 @@ const SignupForm = () => {
     phoneNumber: "",
     password: "",
     confirmPassword: "",
-    role: "client" // Default role
+    role: "client", // Default role
+    department: "",
+    skills: []
   });
   const [errors, setErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [inputSkill, setInputSkill] = useState("");
   const navigate = useNavigate();
+
+  // Departments for Collaborator/Intern
+  const departments = [
+    "Design",
+    "Development",
+    "Marketing",
+    "Content",
+    "Quality Assurance",
+    "Product Management"
+  ];
+
+  // Common skills for autocomplete suggestions
+  const skillSuggestions = [
+    "JavaScript",
+    "React",
+    "Python",
+    "Node.js",
+    "Agile Methodology",
+    "Project Management",
+    "Digital Marketing",
+    "SEO",
+    "Content Writing",
+    "UI/UX Design",
+    "Graphic Design",
+    "Data Analysis",
+    "Machine Learning",
+    "Sales Techniques",
+    "CRM Software",
+    "Social Media Marketing"
+  ];
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -58,6 +98,30 @@ const SignupForm = () => {
         [name]: null
       });
     }
+  };
+
+  const handleAddSkill = () => {
+    if (inputSkill && inputSkill.trim() && !formData.skills.includes(inputSkill.trim())) {
+      setFormData({
+        ...formData,
+        skills: [...formData.skills, inputSkill.trim()]
+      });
+      setInputSkill("");
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && inputSkill.trim()) {
+      handleAddSkill();
+      e.preventDefault();
+    }
+  };
+
+  const handleRemoveSkill = (skillToRemove) => {
+    setFormData({
+      ...formData,
+      skills: formData.skills.filter(skill => skill !== skillToRemove)
+    });
   };
 
   const validateForm = () => {
@@ -102,6 +166,11 @@ const SignupForm = () => {
       newErrors.role = "Please select a role";
     }
 
+    // Department validation for collaborator/intern
+    if (["collaborator", "intern"].includes(formData.role) && !formData.department) {
+      newErrors.department = "Department is required";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -119,23 +188,49 @@ const SignupForm = () => {
         formData.password
       );
 
-      // Save additional user data to Firestore
-      await setDoc(doc(db, "users", userCredential.user.uid), {
+      // Prepare user data for Firestore
+      const userData = {
         firstName: formData.firstName,
         lastName: formData.lastName,
         username: formData.username,
         email: formData.email,
         phoneNumber: formData.phoneNumber,
-        role: formData.role, // Add role to user document
+        role: formData.role,
         uid: userCredential.user.uid,
         createdAt: new Date().toISOString(),
-      });
+      };
+
+      // Add department if collaborator/intern
+      if (["collaborator", "intern"].includes(formData.role)) {
+        userData.department = formData.department;
+      }
+
+      // Add skills if they exist and role requires them
+      if (formData.skills.length > 0 && 
+          ["sales", "projectManager", "collaborator", "intern", "marketing"].includes(formData.role)) {
+        userData.skills = formData.skills;
+      }
+
+      // Save additional user data to Firestore
+      await setDoc(doc(db, "users", userCredential.user.uid), userData);
 
       // Redirect based on role after successful signup
-      if (formData.role === "sales") {
-        navigate("/sales-dashboard");
-      } else {
-        navigate("/client-dashboard");
+      switch(formData.role) {
+        case "sales":
+          navigate("/sales-dashboard");
+          break;
+        case "projectManager":
+          navigate("/manager-dashboard");
+          break;
+        case "collaborator":
+        case "intern":
+          navigate("/collaborator-dashboard");
+          break;
+        case "marketing":
+          navigate("/marketing-dashboard");
+          break;
+        default:
+          navigate("/client-dashboard");
       }
     } catch (error) {
       setErrors({
@@ -147,16 +242,33 @@ const SignupForm = () => {
     }
   };
 
+  const getRoleIcon = (role) => {
+    switch(role) {
+      case "sales":
+        return <FaUserTie className="text-gray-400" />;
+      case "projectManager":
+        return <FaUserShield className="text-gray-400" />;
+      case "collaborator":
+        return <FaUserCircle className="text-gray-400" />;
+      case "intern":
+        return <FaUserGraduate className="text-gray-400" />;
+      case "marketing":
+        return <FaBullhorn className="text-gray-400" />;
+      default:
+        return <FaUser className="text-gray-400" />;
+    }
+  };
+
   return (
-    <Box className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <Box className="w-full max-w-lg bg-white rounded-xl shadow-lg overflow-hidden">
+    <Box className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 p-4">
+      <Box className="w-full max-w-lg bg-white rounded-xl shadow-xl overflow-hidden transform transition-all hover:shadow-2xl">
         {/* Header */}
         <Box className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-center">
           <Typography variant="h4" className="font-bold text-white">
             Create Your Account
           </Typography>
           <Typography variant="subtitle1" className="text-blue-100 mt-1">
-            Join our community today
+            Join DXD Magnate Today
           </Typography>
         </Box>
 
@@ -259,21 +371,108 @@ const SignupForm = () => {
                 label="Role"
                 startAdornment={
                   <InputAdornment position="start">
-                    {formData.role === "sales" ? (
-                      <FaUserTie className="text-gray-400" />
-                    ) : (
-                      <FaUserCircle className="text-gray-400" />
-                    )}
+                    {getRoleIcon(formData.role)}
                   </InputAdornment>
                 }
               >
                 <MenuItem value="client">Client</MenuItem>
                 <MenuItem value="sales">Sales</MenuItem>
+                <MenuItem value="projectManager">Project Manager</MenuItem>
+                <MenuItem value="collaborator">Collaborator</MenuItem>
+                <MenuItem value="intern">Intern</MenuItem>
+                <MenuItem value="marketing">Marketing</MenuItem>
               </Select>
               {errors.role && (
                 <FormHelperText>{errors.role}</FormHelperText>
               )}
             </FormControl>
+
+            {/* Department Selection (for Collaborator/Intern) */}
+            {["collaborator", "intern"].includes(formData.role) && (
+              <FormControl fullWidth error={!!errors.department}>
+                <InputLabel>Department</InputLabel>
+                <Select
+                  name="department"
+                  value={formData.department}
+                  onChange={handleChange}
+                  label="Department"
+                  required
+                  startAdornment={
+                    <InputAdornment position="start">
+                      <FaBuilding className="text-gray-400" />
+                    </InputAdornment>
+                  }
+                >
+                  {departments.map((dept) => (
+                    <MenuItem key={dept} value={dept}>{dept}</MenuItem>
+                  ))}
+                </Select>
+                {errors.department && (
+                  <FormHelperText>{errors.department}</FormHelperText>
+                )}
+              </FormControl>
+            )}
+
+            {/* Skills Input (Conditional) */}
+            {["sales", "projectManager", "collaborator", "intern", "marketing"].includes(formData.role) && (
+              <Box className="space-y-2">
+                <Typography variant="subtitle2" className="text-gray-600">
+                  Skills (Optional)
+                </Typography>
+                <Box className="flex gap-2">
+                  <Autocomplete
+                    freeSolo
+                    fullWidth
+                    options={skillSuggestions}
+                    value={inputSkill}
+                    onChange={(e, newValue) => setInputSkill(newValue || "")}
+                    inputValue={inputSkill}
+                    onInputChange={(e, newInputValue) => setInputSkill(newInputValue || "")}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        placeholder="Add your skills"
+                        onKeyDown={handleKeyDown}
+                        InputProps={{
+                          ...params.InputProps,
+                          startAdornment: (
+                            <InputAdornment position="start">
+                              <FaTools className="text-gray-400" />
+                            </InputAdornment>
+                          ),
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <Button
+                                variant="contained"
+                                size="small"
+                                onClick={handleAddSkill}
+                                disabled={!inputSkill.trim()}
+                                className="bg-blue-500 hover:bg-blue-600 text-white"
+                              >
+                                Add
+                              </Button>
+                            </InputAdornment>
+                          )
+                        }}
+                      />
+                    )}
+                  />
+                </Box>
+                {formData.skills.length > 0 && (
+                  <Box className="flex flex-wrap gap-2">
+                    {formData.skills.map((skill) => (
+                      <Chip
+                        key={skill}
+                        label={skill}
+                        onDelete={() => handleRemoveSkill(skill)}
+                        className="bg-blue-100 text-blue-800"
+                        deleteIcon={<span className="text-blue-600 hover:text-blue-800">✕</span>}
+                      />
+                    ))}
+                  </Box>
+                )}
+              </Box>
+            )}
 
             <FormControl fullWidth variant="outlined" error={!!errors.password}>
               <InputLabel>Password</InputLabel>
@@ -328,7 +527,7 @@ const SignupForm = () => {
               variant="contained"
               size="large"
               disabled={loading}
-              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 py-3 rounded-lg shadow-md transition-all duration-300"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 py-3 rounded-lg shadow-md transition-all duration-300 transform hover:scale-[1.01]"
             >
               {loading ? 'Creating account...' : 'Sign Up'}
             </Button>

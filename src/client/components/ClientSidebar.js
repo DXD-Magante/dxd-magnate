@@ -31,7 +31,7 @@ const sections = [
   {
     title: "Communications",
     icon: <FiMessageSquare size={20} />,
-    items: ["Messages","Meetings", "Meeting Notes",]
+    items: ["Messages","Meetings", ]
   },
   {
     title: "Billing",

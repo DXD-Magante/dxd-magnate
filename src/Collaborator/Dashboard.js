@@ -93,6 +93,8 @@ const CollaboratorDashboard = ({ mobileOpen, handleDrawerToggle, drawerWidth }) 
           <MainContent 
             activeSection={activeSection} 
             activeSubsection={activeSubsection}
+            setActiveSection={setActiveSection}
+            setActiveSubsection={setActiveSubsection}
           />
         </Box>
       </Box>

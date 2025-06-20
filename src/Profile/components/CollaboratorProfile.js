@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   Box, Typography, Avatar, Button, Card, CardContent,
   Grid, Divider, Chip, Tabs, Tab, Badge, IconButton,
-  LinearProgress, List, ListItem, ListItemAvatar, ListItemText,
-  Paper, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Snackbar, Alert, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Tooltip, CircularProgress
+  LinearProgress, Dialog, DialogTitle, DialogContent, 
+  DialogActions, TextField, Snackbar, Alert, CircularProgress,
+  Paper, useTheme, Tooltip, Skeleton
 } from '@mui/material';
 import {
   FiEdit2, FiMail, FiPhone, FiUser, FiCalendar,
@@ -13,12 +12,14 @@ import {
   FiTrendingUp, FiFileText, FiMessageSquare, FiBell,
   FiChevronDown, FiChevronUp, FiLock, FiSettings,
   FiDownload, FiUpload, FiStar, FiUsers, FiBookmark,
-  FiMessageCircle, FiExternalLink, FiRefreshCw, FiPlus
+  FiMessageCircle, FiExternalLink, FiRefreshCw, FiPlus,
+  FiBarChart2, FiActivity, FiAperture, FiGlobe, FiLinkedin,
+  FiGithub, FiTwitter, FiFigma, FiCode, FiDatabase
 } from 'react-icons/fi';
 import { auth, db } from '../../services/firebase';
-import { doc, getDoc, collection, query, where, getDocs, updateDoc, getCountFromServer, orderBy, limit, startAfter } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, updateDoc, getCountFromServer, orderBy } from 'firebase/firestore';
 import { useParams } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 
 // Import tab components
 import TasksTab from './CollaboratorTabs/TaskTab';
@@ -26,6 +27,7 @@ import LearningTab from './CollaboratorTabs/LearningTab';
 import FeedbackTab from './CollaboratorTabs/FeedbackTab';
 import SettingsTab from './CollaboratorTabs/SettingsTab';
 import TeamTab from './CollaboratorTabs/TeamTab';
+import { FaTrophy } from 'react-icons/fa';
 
 const CollaboratorProfile = () => {
   const { username } = useParams();
@@ -39,16 +41,18 @@ const CollaboratorProfile = () => {
   const [activeTab, setActiveTab] = useState('tasks');
   const [stats, setStats] = useState({
     tasksCompleted: 0,
-    performancePoints: 0,
-    badgesEarned: 0,
+    completionRate: 0,
+    totalTasks: 0,
     leaderboardRank: 0,
-    tasksAssigned: 0,
     pendingApprovals: 0,
-    totalUsers: 0 
+    badgesEarned: 0,
+    topPercentage: 0,
+    totalUsers: 0,
+    performanceScore: 0
   });
-  const [recentActivity, setRecentActivity] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
+  const theme = useTheme();
 
   useEffect(() => {
     const fetchProfileData = async () => {
@@ -102,66 +106,22 @@ const CollaboratorProfile = () => {
 
     const fetchCollaboratorData = async (userId) => {
       try {
-        // 1. Fetch projects where the user is a team member
-        const projectsQuery = query(
-          collection(db, "dxd-magnate-projects"),
-          where("teamMembers", "array-contains", { id: userId })
-        );
+        // Fetch projects where the user is a team member
+        const projectsQuery = query(collection(db, "dxd-magnate-projects"));
         const projectsSnapshot = await getDocs(projectsQuery);
         let projectsData = projectsSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
-    
-        // 2. If no projects found, set empty state and return basic stats
-        if (projectsData.length === 0) {
-          setProjects([]);
-          setSelectedProject(null);
-          
-          // Return basic stats (similar to your existing stats calculation)
-          const tasksQuery = query(
-            collection(db, "project-tasks"),
-            where("assignee.id", "==", userId)
-          );
-          const tasksSnapshot = await getDocs(tasksQuery);
-          const allTasks = tasksSnapshot.docs.map(doc => doc.data());
-          
-          // Calculate basic stats
-          const totalTasks = allTasks.length;
-          const completedTasks = allTasks.filter(task => task.status === 'Done').length;
-          const pendingApprovals = allTasks.filter(task => task.status === 'Review').length;
-          const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-          
-          // Fetch user rank
-          const usersQuery = query(collection(db, "users"), orderBy("performanceScore", "desc"));
-          const usersSnapshot = await getDocs(usersQuery);
-          const allUsers = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          const userRank = allUsers.findIndex(user => user.id === userId) + 1;
-          const totalUsers = allUsers.length;
-          
-          // Fetch badges count
-          const badgesQuery = query(collection(db, "user-badges"), where("userId", "==", userId));
-          const badgesSnapshot = await getCountFromServer(badgesQuery);
-          const badgesCount = badgesSnapshot.data().count;
-          
-          setStats({
-            tasksCompleted: completedTasks,
-            totalTasks: totalTasks,
-            completionRate: completionRate,
-            leaderboardRank: userRank,
-            pendingApprovals: pendingApprovals,
-            badgesEarned: badgesCount,
-            topPercentage: totalUsers > 0 ? Math.ceil((userRank / totalUsers) * 100) : 0,
-            totalUsers: totalUsers
-          });
-          
-          return;
-        }
-    
-        // 3. Enhance projects data with user details
+
+        // Filter projects where user is a team member
+        projectsData = projectsData.filter(project => 
+          project.teamMembers?.some(member => member.id === userId)
+        );
+
+        // Enhance projects data with user details
         const enhancedProjects = await Promise.all(
           projectsData.map(async (project) => {
-            // Enhance team members
             const enhancedMembers = await Promise.all(
               project.teamMembers.map(async (member) => {
                 try {
@@ -186,8 +146,7 @@ const CollaboratorProfile = () => {
                 }
               })
             );
-    
-            // Enhance project manager details if exists
+
             let enhancedProject = { ...project, teamMembers: enhancedMembers };
             
             if (project.projectManagerId) {
@@ -209,15 +168,15 @@ const CollaboratorProfile = () => {
                 console.error(`Error fetching project manager ${project.projectManagerId}:`, error);
               }
             }
-    
+
             return enhancedProject;
           })
         );
-    
+
         setProjects(enhancedProjects);
-        setSelectedProject(enhancedProjects[0]);
-    
-        // 4. Fetch task statistics (your existing code)
+        setSelectedProject(enhancedProjects[0] || null);
+
+        // Fetch task statistics
         const tasksQuery = query(
           collection(db, "project-tasks"),
           where("assignee.id", "==", userId)
@@ -232,9 +191,7 @@ const CollaboratorProfile = () => {
         const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
         
         // Fetch user rank and total user count
-        const usersQuery = query(
-          collection(db, "users"),
-        );
+        const usersQuery = query(collection(db, "users"), orderBy("performanceScore", "desc"));
         const usersSnapshot = await getDocs(usersQuery);
         const allUsers = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const userRank = allUsers.findIndex(user => user.id === userId) + 1;
@@ -248,8 +205,11 @@ const CollaboratorProfile = () => {
         );
         const badgesSnapshot = await getCountFromServer(badgesQuery);
         const badgesCount = badgesSnapshot.data().count;
-    
-        // 5. Set all stats
+
+        // Get performance score from profile data or calculate
+        const performanceScore = profileData?.performanceScore || 
+          Math.round((completionRate * 0.7) + (badgesCount * 5) + ((totalUsers - userRank + 1) * 0.3));
+
         setStats({
           tasksCompleted: completedTasks,
           totalTasks: totalTasks,
@@ -258,24 +218,10 @@ const CollaboratorProfile = () => {
           pendingApprovals: pendingApprovals,
           badgesEarned: badgesCount,
           topPercentage: topPercentage,
-          totalUsers: totalUsers
+          totalUsers: totalUsers,
+          performanceScore: performanceScore
         });
-    
-        // 6. Fetch recent activity
-        const recentTasks = allTasks
-          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-          .slice(0, 3)
-          .map(task => ({
-            id: task.id,
-            type: "task",
-            title: `Task ${task.status === 'Done' ? 'completed' : 'updated'}: ${task.title}`,
-            date: new Date(task.updatedAt),
-            icon: task.status === 'Done' ? <FiCheckCircle /> : <FiClock />,
-            color: task.status === 'Done' ? "#10B981" : "#3B82F6"
-          }));
-        
-        setRecentActivity(recentTasks);
-    
+
       } catch (error) {
         console.error("Error fetching collaborator data:", error);
         setSnackbarMessage("Failed to load collaborator data");
@@ -284,14 +230,8 @@ const CollaboratorProfile = () => {
       }
     };
     
-   
     fetchProfileData();
   }, [username]);
-
-  
-
-
-  
 
   const handleEditOpen = () => {
     setEditOpen(true);
@@ -344,8 +284,14 @@ const CollaboratorProfile = () => {
 
   const formatDate = (date) => {
     if (!date) return "N/A";
-    if (typeof date === 'string') date = new Date(date);
-    return format(date, 'dd MMM yyyy');
+    try {
+      // Handle both string dates and Date objects
+      const parsedDate = typeof date === 'string' ? parseISO(date) : date;
+      return format(parsedDate, 'dd MMM yyyy');
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "Invalid date";
+    }
   };
 
   const getInitials = (name) => {
@@ -354,20 +300,64 @@ const CollaboratorProfile = () => {
     return names.map(n => n[0]).join('').toUpperCase();
   };
 
-  const formatLastActive = (timestamp) => {
-    if (!timestamp) return "Last seen: Unknown";
-    
-    if (typeof timestamp === 'string') {
-      return `Last seen: ${new Date(timestamp).toLocaleString()}`;
-    }
-    
-    return `Last seen: ${timestamp.toDate().toLocaleString()}`;
+  const renderSocialLinks = () => {
+    const socialLinks = [
+      { icon: <FiLinkedin />, url: profileData?.linkedin, color: '#0A66C2' },
+      { icon: <FiGithub />, url: profileData?.github, color: '#181717' },
+      { icon: <FiTwitter />, url: profileData?.twitter, color: '#1DA1F2' },
+      { icon: <FiGlobe />, url: profileData?.website, color: theme.palette.primary.main },
+    ].filter(link => link.url);
+
+    if (socialLinks.length === 0) return null;
+
+    return (
+      <Box className="flex gap-2 mt-3">
+        {socialLinks.map((link, index) => (
+          <Tooltip key={index} title={link.url}>
+            <IconButton
+              component="a"
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                color: link.color,
+                backgroundColor: `${link.color}10`,
+                '&:hover': {
+                  backgroundColor: `${link.color}20`,
+                }
+              }}
+            >
+              {link.icon}
+            </IconButton>
+          </Tooltip>
+        ))}
+      </Box>
+    );
   };
 
   if (loading) {
     return (
-      <Box className="flex items-center justify-center h-screen">
-        <CircularProgress />
+      <Box className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto" sx={{ marginTop: '60px' }}>
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={4}>
+            <Card sx={{ borderRadius: '12px', mb: 3 }}>
+              <CardContent>
+                <Box className="flex flex-col items-center py-4">
+                  <Skeleton variant="circular" width={100} height={100} />
+                  <Skeleton variant="text" width={200} height={40} sx={{ mt: 2 }} />
+                  <Skeleton variant="text" width={150} height={24} />
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={8}>
+            <Card sx={{ borderRadius: '12px' }}>
+              <CardContent>
+                <Skeleton variant="rectangular" height={400} />
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
       </Box>
     );
   }
@@ -375,22 +365,33 @@ const CollaboratorProfile = () => {
   if (!profileData) {
     return (
       <Box className="flex items-center justify-center h-screen">
-        <Typography>No profile data found</Typography>
+        <Typography variant="h6" className="text-gray-600">
+          No profile data found
+        </Typography>
       </Box>
     );
   }
 
   return (
-    <Box className="bg-gray-50 min-h-screen p-6 max-w-7xl mx-auto" sx={{ marginTop: '60px' }}>
+    <Box className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto" sx={{ marginTop: '60px' }}>
       {/* Header Section */}
-      <Box className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8">
-        <Box className="flex items-center space-x-4 mb-4 md:mb-0">
+      <Box className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
+        <Box className="flex items-start md:items-center space-x-4">
           <Badge
             overlap="circular"
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             badgeContent={
-              <IconButton size="small" color="primary" component="label">
-                <FiEdit2 size={12} />
+              <IconButton 
+                size="small" 
+                className="bg-indigo-100 hover:bg-indigo-200"
+                component="label"
+                sx={{
+                  '&:hover': {
+                    backgroundColor: theme.palette.primary.light,
+                  }
+                }}
+              >
+                <FiEdit2 size={12} className="text-indigo-600" />
                 <input type="file" hidden />
               </IconButton>
             }
@@ -398,198 +399,474 @@ const CollaboratorProfile = () => {
             <Avatar
               alt={`${profileData.firstName} ${profileData.lastName}`}
               src={profileData.photoURL}
-              sx={{ width: 100, height: 100 }}
-              className="shadow-lg ring-2 ring-white"
+              sx={{ 
+                width: 100, 
+                height: 100,
+                boxShadow: theme.shadows[3],
+                border: `3px solid ${theme.palette.background.paper}`,
+                fontSize: '2.5rem'
+              }}
+              className="hover:shadow-lg transition-shadow duration-300"
             >
               {getInitials(`${profileData.firstName} ${profileData.lastName}`)}
             </Avatar>
           </Badge>
+          
           <Box>
-            <Typography variant="h4" className="font-bold text-gray-800">
-              {profileData.firstName} {profileData.lastName}
-            </Typography>
+            <Box className="flex items-center flex-wrap">
+              <Typography variant="h4" className="font-bold text-gray-800">
+                {profileData.firstName} {profileData.lastName}
+              </Typography>
+              {profileData.allTimeRank && (
+                  <Chip 
+                    label={`Rank #${profileData.allTimeRank}`}
+                    size="small" 
+                    color="primary" 
+                    className="ml-2" 
+                    sx={{
+                      ml: 1,
+                      fontWeight: 'bold',
+                      background: 'linear-gradient(45deg, #ffd700 30%, #ffbf00 90%)',
+                      color: '#000',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      '.MuiChip-icon': { color: '#fff' }
+                    }}
+                  />
+                )}
+            </Box>
+            
             <Typography variant="subtitle1" className="text-gray-600 mt-1">
               {profileData.department || "Collaborator"} • {profileData.role}
             </Typography>
-            <Box className="flex space-x-2 mt-2">
-              <div className="flex items-center text-sm text-gray-600">
-                <FiMail className="mr-1" />
-                <span>{profileData.email}</span>
-              </div>
-              <div className="flex items-center text-sm text-gray-600">
-                <FiPhone className="mr-1" />
-                <span>{profileData.phone || "Not provided"}</span>
-              </div>
+            
+            <Box className="flex flex-wrap gap-2 mt-2">
+              <Chip 
+                icon={<FiMail size={14} />}
+                label={profileData.email}
+                size="small"
+                variant="outlined"
+                className="text-gray-600"
+              />
+              {profileData.phone && (
+                <Chip 
+                  icon={<FiPhone size={14} />}
+                  label={profileData.phone}
+                  size="small"
+                  variant="outlined"
+                  className="text-gray-600"
+                />
+              )}
+              {profileData.lastActive && (
+                <Chip 
+                  icon={<FiClock size={14} />}
+                  label={`Active ${formatDate(profileData.lastActive)}`}
+                  size="small"
+                  variant="outlined"
+                  className="text-gray-600"
+                />
+              )}
             </Box>
+
+            {renderSocialLinks()}
           </Box>
         </Box>
-        <Box className="flex space-x-3">
+        
+        <Box className="flex space-x-2">
           <Button
             variant="contained"
             startIcon={<FiEdit2 />}
             onClick={handleEditOpen}
-            className="bg-indigo-600 hover:bg-indigo-700"
+            sx={{
+              textTransform: 'none',
+              borderRadius: '10px',
+              padding: '8px 16px',
+              background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+              boxShadow: '0 4px 6px rgba(79, 70, 229, 0.2)',
+              '&:hover': {
+                boxShadow: '0 6px 8px rgba(79, 70, 229, 0.3)',
+                background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.dark} 100%)`,
+              }
+            }}
           >
             Edit Profile
           </Button>
+         
         </Box>
       </Box>
 
-      <Grid container spacing={3} className="mb-8">
-  <Grid item xs={12} sm={6} md={4}>
-    <Paper className="p-4 rounded-xl shadow-sm border border-gray-200">
-      <Box className="flex items-center justify-between">
-        <Box>
-          <Typography variant="subtitle2" className="text-gray-600">
-            Tasks Completed
-          </Typography>
-          <Typography variant="h4" className="font-bold">
-            {stats.tasksCompleted}
-          </Typography>
-          <Typography variant="caption" className="text-gray-500">
-            {stats.completionRate}% completion rate
-          </Typography>
-        </Box>
-        <Avatar sx={{ bgcolor: '#ECFDF5', width: 48, height: 48 }}>
-          <FiCheckCircle size={24} color="#10B981" />
-        </Avatar>
-      </Box>
-    </Paper>
-  </Grid>
-  <Grid item xs={12} sm={6} md={4}>
-    <Paper className="p-4 rounded-xl shadow-sm border border-gray-200">
-      <Box className="flex items-center justify-between">
-        <Box>
-          <Typography variant="subtitle2" className="text-gray-600">
-            Total Tasks
-          </Typography>
-          <Typography variant="h4" className="font-bold">
-            {stats.totalTasks}
-          </Typography>
-          <Typography variant="caption" className="text-gray-500">
-            {stats.pendingApprovals} pending approval
-          </Typography>
-        </Box>
-        <Avatar sx={{ bgcolor: '#EFF6FF', width: 48, height: 48 }}>
-          <FiFileText size={24} color="#3B82F6" />
-        </Avatar>
-      </Box>
-    </Paper>
-  </Grid>
-  <Grid item xs={12} sm={6} md={4}>
-    <Paper className="p-4 rounded-xl shadow-sm border border-gray-200">
-      <Box className="flex items-center justify-between">
-        <Box>
-          <Typography variant="subtitle2" className="text-gray-600">
-            Leaderboard Rank
-          </Typography>
-          <Typography variant="h4" className="font-bold">
-            #{profileData.allTimeRank}
-          </Typography>
-          <Typography variant="caption" className="text-gray-500">
-            Top {Math.ceil((stats.leaderboardRank / stats.totalUsers) * 100)}% of users
-          </Typography>
-        </Box>
-        <Avatar sx={{ bgcolor: '#FEF3C7', width: 48, height: 48 }}>
-          <FiTrendingUp size={24} color="#F59E0B" />
-        </Avatar>
-      </Box>
-    </Paper>
-  </Grid>
-</Grid>
-
-      {/* Overview Metrics */}
-      <Grid container spacing={3} className="mb-8">
-        <Grid item xs={12} md={4}>
-          <Card className="shadow-lg rounded-xl border border-gray-200 h-full">
-            <CardContent className="p-6">
-              <Typography variant="h6" className="font-bold text-gray-800 mb-4">
-                Performance Overview
-              </Typography>
-              
-              <Box>
-  <Typography variant="subtitle2" className="text-gray-600 mb-1">
-    COMPLETION RATE
-  </Typography>
-  <Box className="flex items-center justify-between">
-    <Typography variant="h4" className="font-bold">
-      {stats.completionRate}%
-    </Typography>
-    <Box className="w-1/2">
-      <LinearProgress
-        variant="determinate"
-        value={stats.completionRate}
-        sx={{
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: '#E5E7EB',
-          '& .MuiLinearProgress-bar': {
-            borderRadius: 4,
-            backgroundColor: '#4F46E5'
-          }
-        }}
-      />
-    </Box>
-  </Box>
-</Box>
+      {/* Stats Cards */}
+      <Grid container spacing={3} className="mb-6">
+        {/* Tasks Completed Card */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card 
+            className="h-full hover:shadow-md transition-shadow duration-300" 
+            sx={{ 
+              borderRadius: '12px',
+              borderLeft: `4px solid ${theme.palette.success.main}`,
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                boxShadow: theme.shadows[4]
+              }
+            }}
+          >
+            <CardContent className="p-4">
+              <Box className="flex items-center justify-between">
+                <Box>
+                  <Typography variant="subtitle2" className="text-gray-500">
+                    Tasks Completed
+                  </Typography>
+                  <Typography variant="h4" className="font-bold text-gray-800">
+                    {stats.tasksCompleted}
+                  </Typography>
+                  <Typography variant="caption" className="text-gray-500">
+                    of {stats.totalTasks} total
+                  </Typography>
+                </Box>
+                <Box className="p-3 rounded-full bg-green-50">
+                  <FiCheckCircle size={24} className="text-green-500" />
+                </Box>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={stats.completionRate || 0}
+                sx={{
+                  height: 6,
+                  borderRadius: 3,
+                  mt: 2,
+                  backgroundColor: '#E5E7EB',
+                  '& .MuiLinearProgress-bar': {
+                    borderRadius: 3,
+                    backgroundColor: theme.palette.success.main
+                  }
+                }}
+              />
             </CardContent>
           </Card>
         </Grid>
         
-      
-      </Grid>
+        {/* Performance Score Card */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card 
+            className="h-full hover:shadow-md transition-shadow duration-300" 
+            sx={{ 
+              borderRadius: '12px',
+              borderLeft: `4px solid ${theme.palette.info.main}`,
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                boxShadow: theme.shadows[4]
+              }
+            }}
+          >
+            <CardContent className="p-4">
+              <Box className="flex items-center justify-between">
+                <Box>
+                  <Typography variant="subtitle2" className="text-gray-500">
+                    Performance Score
+                  </Typography>
+                  <Typography variant="h4" className="font-bold text-gray-800">
+                    {stats.performanceScore}
+                  </Typography>
+                  <Typography variant="caption" className="text-gray-500">
+                    {stats.completionRate}% completion
+                  </Typography>
+                </Box>
+                <Box className="p-3 rounded-full bg-blue-50">
+                  <FiActivity size={24} className="text-blue-500" />
+                </Box>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={Math.min(stats.performanceScore, 100)}
+                sx={{
+                  height: 6,
+                  borderRadius: 3,
+                  mt: 2,
+                  backgroundColor: '#E5E7EB',
+                  '& .MuiLinearProgress-bar': {
+                    borderRadius: 3,
+                    backgroundColor: theme.palette.info.main
+                  }
+                }}
+              />
+            </CardContent>
+          </Card>
+        </Grid>
+        
+        {/* Leaderboard Rank Card */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card 
+            className="h-full hover:shadow-md transition-shadow duration-300" 
+            sx={{ 
+              borderRadius: '12px',
+              borderLeft: `4px solid ${theme.palette.warning.main}`,
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                boxShadow: theme.shadows[4]
+              }
+            }}
+          >
+            <CardContent className="p-4">
+              <Box className="flex items-center justify-between">
+                <Box>
+                  <Typography variant="subtitle2" className="text-gray-500">
+                    Leaderboard Rank
+                  </Typography>
+                  <Typography variant="h4" className="font-bold text-gray-800">
+                    #{profileData.allTimeRank}
+                  </Typography>
+              
+                </Box>
+                <Box className="p-3 rounded-full bg-amber-50">
+                  <FiTrendingUp size={24} className="text-amber-500" />
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        
+       </Grid>
 
-      {/* Tabs */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 4 }}>
-      <Tabs 
-  value={activeTab} 
-  onChange={handleTabChange} 
-  variant="scrollable" 
-  scrollButtons="auto"
->
-  <Tab label="Tasks" value="tasks" icon={<FiCheckCircle size={18} />} iconPosition="start" />
-  <Tab label="Team" value="team" icon={<FiUsers size={18} />} iconPosition="start" />
-  <Tab label="Learning" value="learning" icon={<FiBookmark size={18} />} iconPosition="start" />
-  <Tab label="Feedback" value="feedback" icon={<FiMessageSquare size={18} />} iconPosition="start" />
-  <Tab label="Settings" value="settings" icon={<FiSettings size={18} />} iconPosition="start" />
-</Tabs>
+      {/* Performance Overview Section */}
+      <Card className="mb-6 hover:shadow-md transition-shadow duration-300" 
+        sx={{ 
+          borderRadius: '12px',
+          '&:hover': {
+            boxShadow: theme.shadows[4]
+          }
+        }}
+      >
+        <CardContent className="p-4">
+          <Typography variant="h6" className="font-bold text-gray-800 mb-4">
+            Performance Overview
+          </Typography>
+          
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6}>
+              <Paper elevation={0} className="p-4 rounded-lg" sx={{ backgroundColor: theme.palette.grey[50] }}>
+                <Typography variant="subtitle2" className="text-gray-600 mb-2">
+                  Task Completion Rate
+                </Typography>
+                <Box className="flex items-center space-x-4">
+                  <Box className="relative w-24 h-24">
+                    <CircularProgress
+                      variant="determinate"
+                      value={100}
+                      size={96}
+                      thickness={4}
+                      sx={{
+                        position: 'absolute',
+                        color: theme.palette.grey[300],
+                      }}
+                    />
+                    <CircularProgress
+                      variant="determinate"
+                      value={stats.completionRate || 0}
+                      size={96}
+                      thickness={4}
+                      sx={{
+                        color: theme.palette.primary.main,
+                      }}
+                    />
+                    <Box className="absolute inset-0 flex items-center justify-center">
+                      <Typography variant="h5" className="font-bold">
+                        {stats.completionRate}%
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box>
+                    <Box className="flex items-center space-x-2 mb-1">
+                      <Box className="w-3 h-3 rounded-full bg-indigo-600"></Box>
+                      <Typography variant="caption" className="text-gray-600">
+                        Completed: {stats.tasksCompleted}
+                      </Typography>
+                    </Box>
+                    <Box className="flex items-center space-x-2 mb-1">
+                      <Box className="w-3 h-3 rounded-full bg-gray-200"></Box>
+                      <Typography variant="caption" className="text-gray-600">
+                        Pending: {stats.totalTasks - stats.tasksCompleted}
+                      </Typography>
+                    </Box>
+                    <Box className="flex items-center space-x-2">
+                      <Box className="w-3 h-3 rounded-full bg-yellow-500"></Box>
+                      <Typography variant="caption" className="text-gray-600">
+                        In Review: {stats.pendingApprovals}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Box>
+              </Paper>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <Paper elevation={0} className="p-4 rounded-lg h-full" sx={{ backgroundColor: theme.palette.grey[50] }}>
+                <Typography variant="subtitle2" className="text-gray-600 mb-2">
+                  Current Projects
+                </Typography>
+                {projects.length > 0 ? (
+                  <Box className="space-y-3">
+                    {projects.slice(0, 2).map(project => (
+                      <Box key={project.id} className="flex items-center space-x-3">
+                        <Avatar 
+                          sx={{ 
+                            width: 40, 
+                            height: 40,
+                            bgcolor: theme.palette.primary.light,
+                            color: theme.palette.primary.dark,
+                            fontWeight: 'bold'
+                          }}
+                        >
+                          {project.title?.charAt(0) || 'P'}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="subtitle2" className="font-medium">
+                            {project.title || 'Untitled Project'}
+                          </Typography>
+                          <Typography variant="caption" className="text-gray-500">
+                            {project.status} • Due {formatDate(project.endDate)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ))}
+                    {projects.length > 2 && (
+                      <Typography variant="caption" className="text-indigo-600">
+                        +{projects.length - 2} more projects
+                      </Typography>
+                    )}
+                  </Box>
+                ) : (
+                  <Typography variant="body2" className="text-gray-500">
+                    No active projects
+                  </Typography>
+                )}
+              </Paper>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Tabs Section */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs 
+          value={activeTab} 
+          onChange={handleTabChange} 
+          variant="scrollable" 
+          scrollButtons="auto"
+          sx={{
+            '& .MuiTabs-indicator': {
+              height: 3,
+              backgroundColor: theme.palette.primary.main,
+            }
+          }}
+        >
+          <Tab 
+            label="Tasks" 
+            value="tasks" 
+            icon={<FiCheckCircle size={18} />} 
+            iconPosition="start" 
+            sx={{ 
+              textTransform: 'none',
+              minHeight: 48,
+              '&.Mui-selected': {
+                color: theme.palette.primary.main,
+              }
+            }}
+          />
+          <Tab 
+            label="Team" 
+            value="team" 
+            icon={<FiUsers size={18} />} 
+            iconPosition="start" 
+            sx={{ 
+              textTransform: 'none',
+              minHeight: 48,
+              '&.Mui-selected': {
+                color: theme.palette.primary.main,
+              }
+            }}
+          />
+          <Tab 
+            label="Learning" 
+            value="learning" 
+            icon={<FiBookmark size={18} />} 
+            iconPosition="start" 
+            sx={{ 
+              textTransform: 'none',
+              minHeight: 48,
+              '&.Mui-selected': {
+                color: theme.palette.primary.main,
+              }
+            }}
+          />
+          <Tab 
+            label="Feedback" 
+            value="feedback" 
+            icon={<FiMessageSquare size={18} />} 
+            iconPosition="start" 
+            sx={{ 
+              textTransform: 'none',
+              minHeight: 48,
+              '&.Mui-selected': {
+                color: theme.palette.primary.main,
+              }
+            }}
+          />
+          <Tab 
+            label="Settings" 
+            value="settings" 
+            icon={<FiSettings size={18} />} 
+            iconPosition="start" 
+            sx={{ 
+              textTransform: 'none',
+              minHeight: 48,
+              '&.Mui-selected': {
+                color: theme.palette.primary.main,
+              }
+            }}
+          />
+        </Tabs>
       </Box>
 
       {/* Tab Content */}
       <Box>
-        {/* Tasks Tab */}
         {activeTab === 'tasks' && (
-          <TasksTab formatDate={formatDate} />
+          <TasksTab formatDate={formatDate} userId={profileData?.uid} />
         )}
 
-        {/* Learning Tab */}
         {activeTab === 'learning' && (
           <LearningTab formatDate={formatDate} />
         )}
 
-        {/* Feedback Tab */}
         {activeTab === 'feedback' && (
           <FeedbackTab formatDate={formatDate} />
         )}
 
-        {/* Team Tab */}
-          {activeTab === 'team' && (
-            <TeamTab 
-              projects={projects} 
-              selectedProject={selectedProject}
-              setSelectedProject={setSelectedProject}
-              formatDate={formatDate}
-            />
-          )}
+        {activeTab === 'team' && (
+          <TeamTab 
+            projects={projects} 
+            selectedProject={selectedProject}
+            setSelectedProject={setSelectedProject}
+            formatDate={formatDate}
+          />
+        )}
 
-        {/* Settings Tab */}
         {activeTab === 'settings' && (
           <SettingsTab profileData={profileData} />
         )}
       </Box>
 
       {/* Edit Profile Dialog */}
-      <Dialog open={editOpen} onClose={handleEditClose} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={editOpen} 
+        onClose={handleEditClose} 
+        maxWidth="sm" 
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: '12px',
+            backgroundImage: 'none'
+          }
+        }}
+      >
         <DialogTitle className="font-bold text-gray-800">
           Edit Profile
         </DialogTitle>
@@ -600,15 +877,30 @@ const CollaboratorProfile = () => {
                 overlap="circular"
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 badgeContent={
-                  <IconButton size="small" color="primary" component="label">
-                    <FiUpload size={16} />
+                  <IconButton 
+                    size="small" 
+                    className="bg-indigo-100 hover:bg-indigo-200"
+                    component="label"
+                    sx={{
+                      '&:hover': {
+                        backgroundColor: theme.palette.primary.light,
+                      }
+                    }}
+                  >
+                    <FiUpload size={16} className="text-indigo-600" />
                     <input type="file" hidden />
                   </IconButton>
                 }
               >
                 <Avatar
                   src={tempData.photoURL}
-                  sx={{ width: 80, height: 80, margin: '0 auto' }}
+                  sx={{ 
+                    width: 80, 
+                    height: 80, 
+                    margin: '0 auto',
+                    boxShadow: theme.shadows[3],
+                    fontSize: '2rem'
+                  }}
                 >
                   {getInitials(`${tempData.firstName} ${tempData.lastName}`)}
                 </Avatar>
@@ -625,6 +917,11 @@ const CollaboratorProfile = () => {
                   onChange={handleInputChange}
                   variant="outlined"
                   size="small"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '8px',
+                    }
+                  }}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -636,6 +933,11 @@ const CollaboratorProfile = () => {
                   onChange={handleInputChange}
                   variant="outlined"
                   size="small"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: '8px',
+                    }
+                  }}
                 />
               </Grid>
             </Grid>
@@ -649,6 +951,11 @@ const CollaboratorProfile = () => {
               variant="outlined"
               size="small"
               disabled
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '8px',
+                }
+              }}
             />
             
             <TextField
@@ -659,17 +966,88 @@ const CollaboratorProfile = () => {
               onChange={handleInputChange}
               variant="outlined"
               size="small"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '8px',
+                }
+              }}
+            />
+
+            <TextField
+              fullWidth
+              label="LinkedIn"
+              name="linkedin"
+              value={tempData.linkedin || ""}
+              onChange={handleInputChange}
+              variant="outlined"
+              size="small"
+              InputProps={{
+                startAdornment: (
+                  <Box sx={{ marginRight: 1, display: 'flex' }}>
+                    <FiLinkedin color="#0A66C2" />
+                  </Box>
+                ),
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '8px',
+                }
+              }}
+            />
+
+            <TextField
+              fullWidth
+              label="GitHub"
+              name="github"
+              value={tempData.github || ""}
+              onChange={handleInputChange}
+              variant="outlined"
+              size="small"
+              InputProps={{
+                startAdornment: (
+                  <Box sx={{ marginRight: 1, display: 'flex' }}>
+                    <FiGithub color="#181717" />
+                  </Box>
+                ),
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '8px',
+                }
+              }}
             />
           </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleEditClose} className="text-gray-600 hover:bg-gray-100">
+        <DialogActions sx={{ padding: '16px 24px' }}>
+          <Button 
+            onClick={handleEditClose} 
+            variant="outlined"
+            sx={{
+              borderRadius: '8px',
+              textTransform: 'none',
+              padding: '8px 16px',
+              color: theme.palette.text.secondary,
+              '&:hover': {
+                backgroundColor: theme.palette.grey[100]
+              }
+            }}
+          >
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             variant="contained"
-            className="bg-indigo-600 hover:bg-indigo-700"
+            sx={{
+              borderRadius: '8px',
+              textTransform: 'none',
+              padding: '8px 16px',
+              boxShadow: 'none',
+              background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+              '&:hover': {
+                boxShadow: '0 4px 6px rgba(79, 70, 229, 0.2)',
+                background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.dark} 100%)`,
+              }
+            }}
           >
             Save Changes
           </Button>
@@ -686,7 +1064,12 @@ const CollaboratorProfile = () => {
         <Alert
           onClose={handleSnackbarClose}
           severity={snackbarSeverity}
-          sx={{ width: '100%' }}
+          sx={{ 
+            width: '100%',
+            borderRadius: '8px',
+            boxShadow: theme.shadows[3],
+            alignItems: 'center'
+          }}
         >
           {snackbarMessage}
         </Alert>

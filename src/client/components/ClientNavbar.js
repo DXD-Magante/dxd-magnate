@@ -54,14 +54,15 @@ const ClientNavbar = ({ drawerWidth, handleDrawerToggle }) => {
   const unreadChatCount = useUnreadChatCount();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let unsubscribeUser = () => {};
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        try {
-          const userDocRef = doc(db, "users", user.uid);
-          const userDocSnap = await getDoc(userDocRef);
-          
-          if (userDocSnap.exists()) {
-            const userData = userDocSnap.data();
+        // Set up real-time listener for user data
+        const userDocRef = doc(db, "users", user.uid);
+        unsubscribeUser = onSnapshot(userDocRef, (doc) => {
+          if (doc.exists()) {
+            const userData = doc.data();
             setCurrentUser({
               uid: user.uid,
               email: user.email,
@@ -69,10 +70,11 @@ const ClientNavbar = ({ drawerWidth, handleDrawerToggle }) => {
               firstName: userData.firstName,
               lastName: userData.lastName,
               role: userData.role,
-              photoURL: user.photoURL || null,
+              photoURL: user.photoURL || userData.photoURL || null,
               username: userData.username
             });
           } else {
+            // Fallback if user document doesn't exist
             setCurrentUser({
               uid: user.uid,
               email: user.email,
@@ -83,25 +85,18 @@ const ClientNavbar = ({ drawerWidth, handleDrawerToggle }) => {
               photoURL: user.photoURL || null
             });
           }
-        } catch (error) {
-          console.error("Error fetching user data:", error);
-          setCurrentUser({
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName || "Client",
-            firstName: user.displayName?.split(' ')[0] || "Client",
-            lastName: user.displayName?.split(' ')[1] || "",
-            role: "Client",
-            photoURL: user.photoURL || null
-          });
-        }
+          setLoading(false);
+        });
       } else {
         setCurrentUser(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      unsubscribeUser();
+    };
   }, []);
 
   // Fetch client notifications
@@ -350,16 +345,9 @@ const ClientNavbar = ({ drawerWidth, handleDrawerToggle }) => {
                   fontSize: '0.875rem',
                   fontWeight: 'bold'
                 }}
+                src={currentUser.photoURL}
               >
-                {currentUser.photoURL ? (
-                  <img 
-                    src={currentUser.photoURL} 
-                    alt={currentUser.displayName}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  getInitials(currentUser.displayName)
-                )}
+                {currentUser.photoURL ? null : getInitials(currentUser.displayName)}
               </Avatar>
               <div className="hidden md:block ml-2 mr-1 text-left">
                 <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>

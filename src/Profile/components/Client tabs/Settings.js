@@ -355,127 +355,117 @@ const formatLastActive = (timestamp) => {
             Profile Settings
           </Typography>
           
-          <Box className="text-center mb-6">
-            <Badge
-              overlap="circular"
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-              badgeContent={
-                <IconButton size="small" color="primary" component="label">
-                  <FiUpload size={14} />
-                  <input type="file" hidden accept="image/*" />
-                </IconButton>
-              }
-            >
-              <Avatar
-                src={profileData.photoURL}
-                sx={{ width: 100, height: 100, margin: '0 auto' }}
-              />
-            </Badge>
-          </Box>
+        
 
           <form onSubmit={handleSubmit}>
-            <Grid container spacing={3}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="First Name"
-                  name="firstName"
-                  value={formData.firstName}
-                  onChange={handleInputChange}
-                  variant="outlined"
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Last Name"
-                  name="lastName"
-                  value={formData.lastName}
-                  onChange={handleInputChange}
-                  variant="outlined"
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  variant="outlined"
-                  size="small"
-                  disabled
-                  InputProps={{
-                    startAdornment: <FiMail className="mr-2 text-gray-400" />
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Phone"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleInputChange}
-                  variant="outlined"
-                  size="small"
-                  InputProps={{
-                    startAdornment: <FiPhone className="mr-2 text-gray-400" />
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Company"
-                  name="company"
-                  value={formData.company}
-                  onChange={handleInputChange}
-                  variant="outlined"
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Timezone"
-                  name="timezone"
-                  value={formData.timezone}
-                  onChange={handleInputChange}
-                  variant="outlined"
-                  size="small"
-                  select
-                  SelectProps={{ native: true }}
-                  InputProps={{
-                    startAdornment: <FiGlobe className="mr-2 text-gray-400" />
-                  }}
-                >
-                  <option value="GMT+5:30 (India Standard Time)">
-                    GMT+5:30 (India Standard Time)
-                  </option>
-                  <option value="GMT-5:00 (Eastern Time)">
-                    GMT-5:00 (Eastern Time)
-                  </option>
-                  <option value="GMT+0:00 (GMT)">
-                    GMT+0:00 (GMT)
-                  </option>
-                </TextField>
-              </Grid>
-            </Grid>
+  <Grid >  {/* Added spacing between grid items */}
+    <Grid item xs={12} sm={6}>
+      <TextField
+        fullWidth
+        label="First Name"
+        name="firstName"
+        value={formData.firstName}
+        onChange={handleInputChange}
+        variant="outlined"
+        size="small"
+        margin="normal" 
+      />
+    </Grid>
+    <Grid item xs={12} sm={6}>
+      <TextField
+        fullWidth
+        label="Last Name"
+        name="lastName"
+        value={formData.lastName}
+        onChange={handleInputChange}
+        variant="outlined"
+        size="small"
+        margin="normal"
+      />
+    </Grid>
+    <Grid item xs={12}>
+      <TextField
+        fullWidth
+        label="Email"
+        name="email"
+        value={formData.email}
+        onChange={handleInputChange}
+        variant="outlined"
+        size="small"
+        disabled
+        margin="normal"
+        InputProps={{
+          startAdornment: <FiMail className="mr-2 text-gray-400" />
+        }}
+      />
+    </Grid>
+    <Grid item xs={12} sm={6}>
+      <TextField
+        fullWidth
+        label="Phone"
+        name="phone"
+        value={formData.phone}
+        onChange={handleInputChange}
+        variant="outlined"
+        size="small"
+        margin="normal"  
+        InputProps={{
+          startAdornment: <FiPhone className="mr-2 text-gray-400" />
+        }}
+      />
+    </Grid>
+    <Grid item xs={12} sm={6}>
+      <TextField
+        fullWidth
+        label="Company"
+        name="company"
+        value={formData.company}
+        onChange={handleInputChange}
+        variant="outlined"
+        size="small"
+        margin="normal" 
+      />
+    </Grid>
+    <Grid item xs={12}>
+      <TextField
+        fullWidth
+        label="Timezone"
+        name="timezone"
+        value={formData.timezone}
+        onChange={handleInputChange}
+        variant="outlined"
+        size="small"
+        select
+        margin="normal"  
+        SelectProps={{ native: true }}
+        InputProps={{
+          startAdornment: <FiGlobe className="mr-2 text-gray-400" />
+        }}
+      >
+        <option value="GMT+5:30 (India Standard Time)">
+          GMT+5:30 (India Standard Time)
+        </option>
+        <option value="GMT-5:00 (Eastern Time)">
+          GMT-5:00 (Eastern Time)
+        </option>
+        <option value="GMT+0:00 (GMT)">
+          GMT+0:00 (GMT)
+        </option>
+      </TextField>
+    </Grid>
+  </Grid>
 
-            <Box className="flex justify-end mt-6">
-              <Button
-                type="submit"
-                variant="contained"
-                className="bg-indigo-600 hover:bg-indigo-700"
-                startIcon={<FiCheck />}
-              >
-                Save Changes
-              </Button>
-            </Box>
-          </form>
+  <Box className="flex justify-end mt-6">
+    <Button
+      type="submit"
+      variant="contained"
+      className="bg-indigo-600 hover:bg-indigo-700"
+      startIcon={<FiCheck />}
+    >
+      Save Changes
+    </Button>
+  </Box>
+</form>
         </CardContent>
       </Card>
 

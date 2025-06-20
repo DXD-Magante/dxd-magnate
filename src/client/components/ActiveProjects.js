@@ -2,33 +2,33 @@ import React, { useState, useEffect } from "react";
 import {
   Box, Card, CardContent, Grid, Typography, Avatar, Chip,
   LinearProgress, Divider, Stack, Button, Tooltip, IconButton,
-  TextField, InputAdornment, Badge, Tabs, Tab
+  TextField, InputAdornment, Badge, Tabs, Tab, Rating
 } from "@mui/material";
 import {
   FiCalendar, FiUsers, FiDollarSign, FiFlag, FiClock,
   FiBarChart2, FiMoreVertical, FiExternalLink, FiSearch,
-  FiLayers, FiCheckCircle, FiAlertCircle, FiTrendingUp
+  FiLayers, FiCheckCircle, FiAlertCircle, FiTrendingUp,
+  FiEdit2
 } from "react-icons/fi";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where, limit } from "firebase/firestore";
 import { db, auth } from "../../services/firebase";
 import { FaRupeeSign } from "react-icons/fa";
+import FeedbackForm from "./feedbackForm";
 
 const ActiveProjects = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [tabValue, setTabValue] = useState("all");
-
-
-
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [selectedProjectForFeedback, setSelectedProjectForFeedback] = useState(null);
 
   useEffect(() => {
     const fetchProjects = async () => {
       try {
         const user = auth.currentUser;
         if (!user) return;
-
-        // Get all projects where current user is the client
+  
         const projectsQuery = query(
           collection(db, "dxd-magnate-projects"),
           where("clientId", "==", user.uid)
@@ -39,7 +39,6 @@ const ActiveProjects = () => {
           const projectId = doc.id;
           const projectData = doc.data();
           
-          // Fetch tasks for this project
           const tasksQuery = query(
             collection(db, "dxd-magnate-tasks"),
             where("projectId", "==", projectId)
@@ -47,17 +46,52 @@ const ActiveProjects = () => {
           const tasksSnapshot = await getDocs(tasksQuery);
           const tasks = tasksSnapshot.docs.map(taskDoc => taskDoc.data());
           
-          // Calculate progress based on completed tasks
           const totalTasks = tasks.length;
           const completedTasks = tasks.filter(task => task.status === "completed").length;
           const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+          
+          let feedbackData = null;
+          if (projectData.feedbackSubmitted) {
+            const projectFeedbackQuery = query(
+              collection(db, "project-feedback"),
+              where("projectId", "==", projectId),
+              where("clientId", "==", user.uid),
+              limit(1)
+            );
+            
+            const managerFeedbackQuery = query(
+              collection(db, "projectManagerRatings"),
+              where("projectId", "==", projectId),
+              where("clientId", "==", user.uid),
+              limit(1)
+            );
+
+            const [projectFeedbackSnap, managerFeedbackSnap] = await Promise.all([
+              getDocs(projectFeedbackQuery),
+              getDocs(managerFeedbackQuery)
+            ]);
+
+            if (!projectFeedbackSnap.empty && !managerFeedbackSnap.empty) {
+              feedbackData = {
+                projectRating: projectFeedbackSnap.docs[0].data().rating,
+                projectFeedback: projectFeedbackSnap.docs[0].data().feedback,
+                projectMedia: projectFeedbackSnap.docs[0].data().media || [],
+                managerRating: managerFeedbackSnap.docs[0].data().rating,
+                managerFeedback: managerFeedbackSnap.docs[0].data().feedback,
+                managerMedia: managerFeedbackSnap.docs[0].data().media || [],
+                projectFeedbackId: projectFeedbackSnap.docs[0].id,
+                managerFeedbackId: managerFeedbackSnap.docs[0].id
+              };
+            }
+          }
           
           return {
             id: projectId,
             ...projectData,
             progress,
             totalTasks,
-            completedTasks
+            completedTasks,
+            feedbackData
           };
         }));
 
@@ -68,7 +102,7 @@ const ActiveProjects = () => {
         setLoading(false);
       }
     };
-
+  
     fetchProjects();
   }, []);
 
@@ -90,6 +124,31 @@ const ActiveProjects = () => {
       case "on hold": return "default";
       case "cancelled": return "error";
       default: return "info";
+    }
+  };
+
+  const handleFeedbackSubmit = (success, isDelete = false) => {
+    setFeedbackOpen(false);
+    if (success) {
+      setProjects(prev => prev.map(project => {
+        if (project.id === selectedProjectForFeedback.id) {
+          return isDelete 
+            ? { ...project, feedbackSubmitted: false, feedbackData: null }
+            : { 
+                ...project, 
+                feedbackSubmitted: true,
+                feedbackData: {
+                  projectRating: selectedProjectForFeedback.feedbackData?.projectRating,
+                  projectFeedback: selectedProjectForFeedback.feedbackData?.projectFeedback,
+                  managerRating: selectedProjectForFeedback.feedbackData?.managerRating,
+                  managerFeedback: selectedProjectForFeedback.feedbackData?.managerFeedback,
+                  projectMedia: selectedProjectForFeedback.feedbackData?.projectMedia || [],
+                  managerMedia: selectedProjectForFeedback.feedbackData?.managerMedia || []
+                }
+              };
+        }
+        return project;
+      }));
     }
   };
 
@@ -127,7 +186,6 @@ const ActiveProjects = () => {
 
   return (
     <Box sx={{ flexGrow: 1 }}>
-      {/* Projects Header with Search and Stats */}
       <Card sx={{ mb: 3, p: 2, backgroundColor: '#f8fafc' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
           <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
@@ -156,7 +214,6 @@ const ActiveProjects = () => {
           />
         </Box>
 
-        {/* Status Tabs */}
         <Tabs 
           value={tabValue} 
           onChange={(e, newValue) => setTabValue(newValue)}
@@ -262,7 +319,6 @@ const ActiveProjects = () => {
 
                   <Divider sx={{ my: 2 }} />
 
-                  {/* Project Meta */}
                   <Grid container spacing={1} sx={{ mb: 2 }}>
                     <Grid item xs={6}>
                       <Stack direction="row" alignItems="center" spacing={1}>
@@ -298,7 +354,6 @@ const ActiveProjects = () => {
                     </Grid>
                   </Grid>
 
-                  {/* Project Type */}
                   <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
                     <Chip 
                       label={project.type || "No type"} 
@@ -317,29 +372,92 @@ const ActiveProjects = () => {
                     )}
                   </Box>
 
-                 {/* Progress Bar */}
-<Box sx={{ mb: 2 }}>
-  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-    <Typography variant="caption" color="text.secondary">
-      Progress ({project.completedTasks || 0}/{project.totalTasks || 0} tasks)
-    </Typography>
-    <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-      {project.progress || 0}%
-    </Typography>
-  </Box>
-  <LinearProgress 
-    variant="determinate" 
-    value={project.progress || 0} 
-    sx={{ 
-      height: 6, 
-      borderRadius: 3,
-      backgroundColor: '#f1f5f9',
-      '& .MuiLinearProgress-bar': {
-        backgroundColor: '#4f46e5'
-      }
-    }} 
-  />
-</Box>
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Progress ({project.completedTasks || 0}/{project.totalTasks || 0} tasks)
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+                        {project.progress || 0}%
+                      </Typography>
+                    </Box>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={project.progress || 0} 
+                      sx={{ 
+                        height: 6, 
+                        borderRadius: 3,
+                        backgroundColor: '#f1f5f9',
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: '#4f46e5'
+                        }
+                      }} 
+                    />
+                  </Box>
+
+                  {project.status?.toLowerCase() === "completed" && (
+                    <Box sx={{ mt: 1 }}>
+                      {project.feedbackSubmitted ? (
+                        <Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="caption" sx={{ mr: 1 }}>Project:</Typography>
+                            <Rating
+                              value={project.feedbackData?.projectRating || 0}
+                              readOnly
+                              size="small"
+                              precision={0.5}
+                            />
+                            <Typography variant="caption" sx={{ ml: 1 }}>
+                              ({project.feedbackData?.projectRating?.toFixed(1) || 0})
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="caption" sx={{ mr: 1 }}>Manager:</Typography>
+                            <Rating
+                              value={project.feedbackData?.managerRating || 0}
+                              readOnly
+                              size="small"
+                              precision={0.5}
+                            />
+                            <Typography variant="caption" sx={{ ml: 1 }}>
+                              ({project.feedbackData?.managerRating?.toFixed(1) || 0})
+                            </Typography>
+                          </Box>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            fullWidth
+                            startIcon={<FiEdit2 size={14} />}
+                            onClick={() => {
+                              setSelectedProjectForFeedback(project);
+                              setFeedbackOpen(true);
+                            }}
+                            sx={{ mt: 1 }}
+                          >
+                            Edit Feedback
+                          </Button>
+                        </Box>
+                      ) : (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          fullWidth
+                          sx={{ 
+                            backgroundColor: '#4f46e5',
+                            '&:hover': {
+                              backgroundColor: '#4338ca',
+                            }
+                          }}
+                          onClick={() => {
+                            setSelectedProjectForFeedback(project);
+                            setFeedbackOpen(true);
+                          }}
+                        >
+                          Submit Feedback
+                        </Button>
+                      )}
+                    </Box>
+                  )}
 
                   <Button
                     variant="outlined"
@@ -379,6 +497,16 @@ const ActiveProjects = () => {
             </Typography>
           </CardContent>
         </Card>
+      )}
+
+      {selectedProjectForFeedback && (
+        <FeedbackForm
+          open={feedbackOpen}
+          onClose={handleFeedbackSubmit}
+          project={selectedProjectForFeedback}
+          projectManager={selectedProjectForFeedback.projectManager}
+          existingFeedback={selectedProjectForFeedback.feedbackData || {}}
+        />
       )}
     </Box>
   );

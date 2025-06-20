@@ -24,7 +24,7 @@ import VerifyEmail from "../Verify/Verify-email";
 import SalesProfilePage from "../Profile/ProfilePage";
 import AdminProfilePage from "../Profile/components/AdminProfile"
 import CollaboratorNavbar from "../Collaborator/components/CollaboratorNavbar";
-import ProjectManagerProfile from "../Profile/components/ProjectManagerProfile";
+import ProjectManagerProfile from "../Profile/components/Project manager/ProjectManagerProfile";
 import CollaboratorDashboard from "../Collaborator/Dashboard";
 import HelpSupportPage from "../Support/SupportPage";
 import ClientProfile from "../Profile/components/Client-Profile";

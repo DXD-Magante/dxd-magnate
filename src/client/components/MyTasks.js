@@ -1,851 +1,1073 @@
-// MyTasks.js
 import React, { useState, useEffect } from "react";
 import {
   Box,
   Typography,
+  Card,
+  CardContent,
   Grid,
-  Paper,
-  Avatar,
-  Chip,
-  Button,
+  LinearProgress,
   TextField,
   InputAdornment,
-  Select,
-  MenuItem,
+  Button,
+  Chip,
+  Avatar,
   Divider,
-  IconButton,
-  Tooltip,
-  Badge,
-  CircularProgress,
   Tabs,
   Tab,
-  LinearProgress,
+  Select,
+  MenuItem,
+  Pagination,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  DialogContentText,
-  TextareaAutosize
+  Rating,
+  Badge,
+  IconButton,
+  Tooltip,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Snackbar,
+  Alert
 } from "@mui/material";
 import {
   FiSearch,
   FiFilter,
-  FiExternalLink,
   FiCheck,
   FiX,
-  FiClock,
-  FiAlertCircle,
-  FiRefreshCw,
-  FiMoreVertical,
-  FiMessageSquare,
-  FiThumbsUp,
-  FiThumbsDown,
-  FiUser,
+  FiEdit2,
   FiDownload,
+  FiExternalLink,
   FiChevronDown,
   FiChevronRight,
-  FiArchive,
-  FiFlag,
-  FiCalendar
+  FiClock,
+  FiCheckCircle,
+  FiAlertCircle,
+  FiFile,
+  FiLink,
+  FiStar,
+  FiMessageSquare,
+  FiSend,
+  FiRefreshCw,
+  FiEye
 } from "react-icons/fi";
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  orderBy, 
-  doc, 
-  updateDoc,
-  addDoc,
-  serverTimestam,
-  getDoc ,
-  serverTimestamp
-} from "firebase/firestore";
+import { collection, getDocs, query, where, doc, updateDoc, addDoc } from "firebase/firestore";
 import { db, auth } from "../../services/firebase";
-import { styled } from '@mui/material/styles';
-
-const statusColors = {
-  pending: { bg: "#fef3c7", text: "#d97706", icon: <FiClock color="#d97706" /> },
-  completed: { bg: "#ecfdf5", text: "#10b981", icon: <FiCheck color="#10b981" /> },
-  in_progress: { bg: "#e0e7ff", text: "#4f46e5", icon: <FiRefreshCw color="#4f46e5" /> },
-  overdue: { bg: "#fee2e2", text: "#ef4444", icon: <FiAlertCircle color="#ef4444" /> },
-  approved: { bg: "#ecfdf5", text: "#10b981", icon: <FiCheck color="#10b981" /> },
-  rejected: { bg: "#fee2e2", text: "#ef4444", icon: <FiX color="#ef4444" /> }
-};
-
-const priorityColors = {
-  high: "#ef4444",
-  medium: "#f59e0b",
-  low: "#10b981"
-};
-
-const TaskCard = styled(Paper)(({ theme }) => ({
-  padding: theme.spacing(3),
-  borderRadius: 12,
-  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-  transition: 'all 0.2s ease',
-  '&:hover': {
-    boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-    transform: 'translateY(-2px)'
-  }
-}));
-
-const ExpandableSection = styled(Box)(({ theme }) => ({
-  backgroundColor: '#f8fafc',
-  borderRadius: 8,
-  overflow: 'hidden',
-  transition: 'all 0.3s ease'
-}));
 
 const MyTasks = () => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [expandedTask, setExpandedTask] = useState(null);
-  const [activeTab, setActiveTab] = useState(0);
-  const [commentDialogOpen, setCommentDialogOpen] = useState(false);
-  const [currentCommentTask, setCurrentCommentTask] = useState(null);
-  const [commentText, setCommentText] = useState("");
-  const [actionDialogOpen, setActionDialogOpen] = useState(false);
-  const [currentActionTask, setCurrentActionTask] = useState(null);
-  const [actionType, setActionType] = useState(null);
-  const [feedbackText, setFeedbackText] = useState("");
-  const [submissionData, setSubmissionData] = useState(null);
-const [submissionLoading, setSubmissionLoading] = useState(false);
-const [submissionDialogOpen, setSubmissionDialogOpen] = useState(false);
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [selectedProject, setSelectedProject] = useState("all");
+  const [page, setPage] = useState(1);
+  const [projects, setProjects] = useState([]);
+  const [openDialog, setOpenDialog] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [rating, setRating] = useState(0);
+  const [feedback, setFeedback] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: "",
+    severity: "success"
+  });
+  const rowsPerPage = 8;
 
-
-const fetchSubmissionDetails = async (submissionId) => {
-  try {
-    setSubmissionLoading(true);
-    const submissionRef = doc(db, "project-submissions", submissionId);
-    const submissionSnap = await getDoc(submissionRef);
-    
-    if (submissionSnap.exists()) {
-      setSubmissionData({
-        id: submissionSnap.id,
-        ...submissionSnap.data()
-      });
-    } else {
-      setSubmissionData(null);
-      alert("Submission not found");
-    }
-  } catch (error) {
-    console.error("Error fetching submission:", error);
-    alert(`Error: ${error.message}`);
-  } finally {
-    setSubmissionLoading(false);
-  }
-};
-
+  // Fetch client's projects and tasks
   useEffect(() => {
-    const fetchTasks = async () => {
+    const fetchData = async () => {
       try {
         const user = auth.currentUser;
         if (!user) return;
 
-        const q = query(
-          collection(db, "client-tasks"),
-          where("assignee.id", "==", user.uid),
+        setLoading(true);
+
+        // Fetch projects where current user is client
+        const projectsQuery = query(
+          collection(db, "dxd-magnate-projects"),
+          where("clientId", "==", user.uid)
         );
-        
-        const querySnapshot = await getDocs(q);
-        const tasksData = querySnapshot.docs.map(doc => ({
+        const projectsSnapshot = await getDocs(projectsQuery);
+        const projectsData = projectsSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
+        setProjects(projectsData);
 
+        // Fetch tasks assigned to this client
+        const tasksQuery = query(
+          collection(db, "client-tasks"),
+          where("clientId", "==", user.uid),
+          where("type", "==", "approval_request")
+        );
+        const tasksSnapshot = await getDocs(tasksQuery);
+        const tasksData = tasksSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
         setTasks(tasksData);
+
+        // Auto-select first project if available
+        if (projectsData.length > 0) {
+          setSelectedProject(projectsData[0].id);
+        }
+
+        setLoading(false);
       } catch (error) {
-        console.error("Error fetching tasks:", error);
-        alert(error)
-      } finally {
+        console.error("Error fetching data:", error);
         setLoading(false);
       }
     };
 
-    fetchTasks();
+    fetchData();
   }, []);
 
+  // Filter tasks based on search, filters and selected project
   const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (task.description || "").toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === "all" || task.status === statusFilter;
-    const matchesType = typeFilter === "all" || task.type === typeFilter;
-    return matchesSearch && matchesStatus && matchesType;
+    const matchesSearch = 
+      task.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      task.notes?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesStatus = 
+      statusFilter === "all" || task.status === statusFilter;
+    
+    const matchesPriority = 
+      priorityFilter === "all" || task.priority === priorityFilter;
+    
+    const matchesProject = 
+      selectedProject === "all" || task.projectId === selectedProject;
+    
+    return matchesSearch && matchesStatus && matchesPriority && matchesProject;
   });
 
-  const handleTaskAction = async (taskId, action, feedback = "") => {
+  // Paginate tasks
+  const paginatedTasks = filteredTasks.slice(
+    (page - 1) * rowsPerPage,
+    page * rowsPerPage
+  );
+
+  const handlePageChange = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleStatusChange = (status) => {
+    setStatusFilter(status);
+    setPage(1);
+  };
+
+  const handlePriorityChange = (priority) => {
+    setPriorityFilter(priority);
+    setPage(1);
+  };
+
+  const handleProjectChange = (projectId) => {
+    setSelectedProject(projectId);
+    setPage(1);
+  };
+
+  const openFeedbackDialog = (task) => {
+    setSelectedTask(task);
+    if (task.clientFeedback) {
+      setRating(task.clientRating || 0);
+      setFeedback(task.clientFeedback || "");
+    } else {
+      setRating(0);
+      setFeedback("");
+    }
+    setOpenDialog(true);
+  };
+
+  const closeFeedbackDialog = () => {
+    setOpenDialog(false);
+    setSelectedTask(null);
+    setRating(0);
+    setFeedback("");
+  };
+
+  const submitFeedback = async (action) => {
     try {
+      setSubmitting(true);
       const user = auth.currentUser;
-      if (!user) throw new Error("User not authenticated");
+      if (!user || !selectedTask) return;
 
-      // Get the task data
-      const task = tasks.find(t => t.id === taskId);
-      if (!task) throw new Error("Task not found");
-
-      // Update client-tasks collection
-      const taskRef = doc(db, "client-tasks", taskId);
+      const taskRef = doc(db, "client-tasks", selectedTask.id);
+      
       await updateDoc(taskRef, {
-        status: action === 'complete' ? 'completed' : 
-               action === 'start' ? 'in_progress' : 
-               action === 'pause' ? 'pending' : 
-               'completed',
-        updatedAt: new Date().toISOString(),
-        ...(feedback && { clientComment: feedback })
+        status: action,
+        clientRating: rating,
+        clientFeedback: feedback,
+        updatedAt: new Date().toISOString()
       });
 
-      // Update client-feedback collection if it's an approval task
-      if (task.type === "approval" && task.feedbackId) {
-        const feedbackRef = doc(db, "client-feedback", task.feedbackId);
-        await updateDoc(feedbackRef, {
-          status: action === 'approve' ? 'approved' : 'rejected',
-          respondedAt: new Date().toISOString(),
-          response: feedback || (action === 'approve' ? 'Approved by client' : 'Rejected by client'),
-          clientId: user.uid,
-          clientName: user.displayName || user.email
-        });
-      }
+      // Create notification for project manager
+      await addDoc(collection(db, "project-manager-notifications"), {
+        message: `Client ${action} your submission: ${selectedTask.title}`,
+        userId: selectedTask.createdBy,
+        viewed: false,
+        timestamp: new Date(),
+        projectId: selectedTask.projectId,
+        projectName: selectedTask.projectTitle,
+        type: "approval-response",
+        priority: selectedTask.priority
+      });
 
-      // Update project-submissions collection if submissionId exists
-      if (task.submissionId) {
-        const submissionRef = doc(db, "project-submissions", task.submissionId);
-        await updateDoc(submissionRef, {
-          status: action === 'approve' ? 'approved' : 
-                 action === 'reject' ? 'rejected' : 
-                 task.status,
-          lastUpdated: new Date().toISOString(),
-          
-          ...(feedback && { clientFeedback: feedback })
-        });
-      }
+      // Update local state
+      setTasks(prev => prev.map(task => 
+        task.id === selectedTask.id ? {
+          ...task,
+          status: action,
+          clientRating: rating,
+          clientFeedback: feedback,
+          updatedAt: new Date().toISOString()
+        } : task
+      ));
 
-      // Add comment if provided
-      if (feedback) {
-        await addDoc(collection(db, "task-comments"), {
-          taskId,
-          userId: user.uid,
-          userName: user.displayName || user.email,
-          comment: feedback,
-          createdAt: serverTimestamp(),
-          actionType: action
-        });
-      }
+      setSnackbar({
+        open: true,
+        message: `Feedback submitted successfully!`,
+        severity: "success"
+      });
+      closeFeedbackDialog();
+    } catch (error) {
+      console.error("Error submitting feedback:", error);
+      setSnackbar({
+        open: true,
+        message: `Error submitting feedback: ${error.message}`,
+        severity: "error"
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-      // Refresh tasks
-      const q = query(
+  const refreshTasks = async () => {
+    try {
+      setLoading(true);
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const tasksQuery = query(
         collection(db, "client-tasks"),
-        where("assignee.id", "==", user.uid),
+        where("clientId", "==", user.uid),
+        where("type", "==", "approval_request")
       );
-      const querySnapshot = await getDocs(q);
-      const tasksData = querySnapshot.docs.map(doc => ({
+      const tasksSnapshot = await getDocs(tasksQuery);
+      const tasksData = tasksSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
       setTasks(tasksData);
-
-      alert(`Task ${action}d successfully!`);
     } catch (error) {
-      console.error(`Error ${action} task:`, error);
-      alert(`Error: ${error.message}`);
+      console.error("Error refreshing tasks:", error);
     } finally {
-      setCommentDialogOpen(false);
-      setActionDialogOpen(false);
-      setCommentText("");
-      setFeedbackText("");
+      setLoading(false);
     }
   };
 
-  const toggleTaskExpand = (taskId) => {
-    setExpandedTask(expandedTask === taskId ? null : taskId);
-  };
-
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "No due date";
-    
-    const date = timestamp.seconds 
-      ? new Date(timestamp.seconds * 1000)
-      : new Date(timestamp);
-      
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric'
+  const formatDate = (dateString) => {
+    if (!dateString) return "No due date";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
     });
   };
 
-  const getTaskProgress = (task) => {
-    if (task.status === 'completed' || task.status === 'approved') return 100;
-    if (task.status === 'in_progress') return 50;
-    if (task.status === 'rejected') return 0;
-    return 10;
+  const formatDateTime = (dateString) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
   };
 
-  const openCommentDialog = (taskId) => {
-    setCurrentCommentTask(taskId);
-    setCommentDialogOpen(true);
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "pending": return "warning";
+      case "approved": return "success";
+      case "rejected": return "error";
+      case "changes_requested": return "info";
+      default: return "default";
+    }
   };
 
-  const openActionDialog = (taskId, type) => {
-    setCurrentActionTask(taskId);
-    setActionType(type);
-    setActionDialogOpen(true);
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case "low": return "success";
+      case "medium": return "warning";
+      case "high": return "error";
+      case "urgent": return "secondary";
+      default: return "default";
+    }
   };
+
+  const statusCounts = tasks.reduce((counts, task) => {
+    counts[task.status] = (counts[task.status] || 0) + 1;
+    counts.total++;
+    return counts;
+  }, { total: 0 });
 
   return (
-    <Box className="space-y-6">
+    <Box sx={{ flexGrow: 1 }}>
       {/* Header */}
-      <Box className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#1e293b', mb: 1 }}>
-            My Tasks 
-          </Typography>
-          <Typography variant="body2" sx={{ color: '#64748b' }}>
-            Manage your assigned tasks and track progress
-          </Typography>
-        </Box>
-   
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" sx={{ fontWeight: "bold", mb: 1 }}>
+          My Tasks
+        </Typography>
+        <Typography variant="body1" sx={{ color: "text.secondary" }}>
+          Review and approve submissions from your project team
+        </Typography>
       </Box>
 
-      {/* Tabs */}
-      <Paper sx={{ borderRadius: 2, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <Tabs 
-          value={activeTab} 
-          onChange={(e, newValue) => setActiveTab(newValue)}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{
-            '& .MuiTabs-indicator': {
-              backgroundColor: '#4f46e5'
-            }
-          }}
-        >
-          <Tab 
-            label="All Tasks" 
-            sx={{
-              fontWeight: 'medium',
-              color: activeTab === 0 ? '#4f46e5' : '#64748b'
-            }}
-          />
-          <Tab 
-            label={
-              <Badge 
-                badgeContent={tasks.filter(t => t.status === 'pending').length} 
-                color="primary"
-                invisible={tasks.filter(t => t.status === 'pending').length === 0}
-              >
-                Pending
-              </Badge>
-            }
-            sx={{
-              fontWeight: 'medium',
-              color: activeTab === 1 ? '#4f46e5' : '#64748b'
-            }}
-          />
-          <Tab 
-            label="In Progress" 
-            sx={{
-              fontWeight: 'medium',
-              color: activeTab === 2 ? '#4f46e5' : '#64748b'
-            }}
-          />
-          <Tab 
-            label="Completed" 
-            sx={{
-              fontWeight: 'medium',
-              color: activeTab === 3 ? '#4f46e5' : '#64748b'
-            }}
-          />
-          <Tab 
-            label="Approvals" 
-            sx={{
-              fontWeight: 'medium',
-              color: activeTab === 4 ? '#4f46e5' : '#64748b'
-            }}
-          />
-        </Tabs>
-      </Paper>
+      {/* Stats Cards */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ 
+            height: "100%",
+            borderLeft: "4px solid #6366f1",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.05)"
+          }}>
+            <CardContent>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Avatar sx={{ 
+                  bgcolor: "#e0e7ff",
+                  color: "#4f46e5",
+                  width: 40,
+                  height: 40
+                }}>
+                  <FiMessageSquare size={20} />
+                </Avatar>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Total Requests
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {statusCounts.total}
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ 
+            height: "100%",
+            borderLeft: "4px solid #10b981",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.05)"
+          }}>
+            <CardContent>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Avatar sx={{ 
+                  bgcolor: "#d1fae5",
+                  color: "#10b981",
+                  width: 40,
+                  height: 40
+                }}>
+                  <FiCheckCircle size={20} />
+                </Avatar>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Approved
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {statusCounts.approved || 0}
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ 
+            height: "100%",
+            borderLeft: "4px solid #f59e0b",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.05)"
+          }}>
+            <CardContent>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Avatar sx={{ 
+                  bgcolor: "#fef3c7",
+                  color: "#f59e0b",
+                  width: 40,
+                  height: 40
+                }}>
+                  <FiClock size={20} />
+                </Avatar>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Pending
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {statusCounts.pending || 0}
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ 
+            height: "100%",
+            borderLeft: "4px solid #ef4444",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.05)"
+          }}>
+            <CardContent>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Avatar sx={{ 
+                  bgcolor: "#fee2e2",
+                  color: "#ef4444",
+                  width: 40,
+                  height: 40
+                }}>
+                  <FiAlertCircle size={20} />
+                </Avatar>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Rejected
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                    {statusCounts.rejected || 0}
+                  </Typography>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
       {/* Filters */}
-      <Paper sx={{ p: 3, borderRadius: 2, boxShadow: '0 1px 3px rgba(0,0,0,0.1)', mb: 3 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
+      <Card sx={{ mb: 3, p: 2, backgroundColor: "#f8fafc" }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} md={4}>
             <TextField
               fullWidth
-              variant="outlined"
+              size="small"
               placeholder="Search tasks..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <FiSearch color="#94a3b8" />
+                    <FiSearch className="text-gray-400" />
                   </InputAdornment>
                 ),
-                sx: { backgroundColor: 'white' }
+                sx: { backgroundColor: "white" }
               }}
             />
           </Grid>
-          <Grid item xs={6} md={3}>
+          <Grid item xs={6} sm={4} md={2}>
             <Select
               fullWidth
+              size="small"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              displayEmpty
-              sx={{ backgroundColor: 'white' }}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              sx={{ backgroundColor: "white" }}
             >
               <MenuItem value="all">All Statuses</MenuItem>
               <MenuItem value="pending">Pending</MenuItem>
-              <MenuItem value="in_progress">In Progress</MenuItem>
-              <MenuItem value="completed">Completed</MenuItem>
-              <MenuItem value="overdue">Overdue</MenuItem>
               <MenuItem value="approved">Approved</MenuItem>
               <MenuItem value="rejected">Rejected</MenuItem>
+              <MenuItem value="changes_requested">Changes Requested</MenuItem>
             </Select>
           </Grid>
-          <Grid item xs={6} md={3}>
+          <Grid item xs={6} sm={4} md={2}>
             <Select
               fullWidth
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              displayEmpty
-              sx={{ backgroundColor: 'white' }}
+              size="small"
+              value={priorityFilter}
+              onChange={(e) => handlePriorityChange(e.target.value)}
+              sx={{ backgroundColor: "white" }}
             >
-              <MenuItem value="all">All Types</MenuItem>
-              <MenuItem value="general">General</MenuItem>
-              <MenuItem value="approval">Approval</MenuItem>
-              <MenuItem value="review">Review</MenuItem>
-              <MenuItem value="feedback">Feedback</MenuItem>
+              <MenuItem value="all">All Priorities</MenuItem>
+              <MenuItem value="low">Low</MenuItem>
+              <MenuItem value="medium">Medium</MenuItem>
+              <MenuItem value="high">High</MenuItem>
+              <MenuItem value="urgent">Urgent</MenuItem>
             </Select>
           </Grid>
+          <Grid item xs={12} sm={4} md={3}>
+            <Select
+              fullWidth
+              size="small"
+              value={selectedProject}
+              onChange={(e) => handleProjectChange(e.target.value)}
+              disabled={projects.length === 0}
+              sx={{ backgroundColor: "white" }}
+            >
+              <MenuItem value="all">All Projects</MenuItem>
+              {projects.map(project => (
+                <MenuItem key={project.id} value={project.id}>
+                  {project.title}
+                </MenuItem>
+              ))}
+            </Select>
+          </Grid>
+          <Grid item xs={12} md={1}>
+            <Tooltip title="Refresh">
+              <IconButton
+                onClick={refreshTasks}
+                sx={{ 
+                  backgroundColor: "white",
+                  border: "1px solid #e2e8f0",
+                  '&:hover': {
+                    backgroundColor: "#f1f5f9"
+                  }
+                }}
+              >
+                <FiRefreshCw size={18} />
+              </IconButton>
+            </Tooltip>
+          </Grid>
         </Grid>
-      </Paper>
+      </Card>
 
-      {/* Content */}
+      {/* Status Tabs */}
+      <Tabs
+        value={statusFilter}
+        onChange={(e, newValue) => handleStatusChange(newValue)}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{ 
+          mb: 3,
+          '& .MuiTabs-indicator': {
+            backgroundColor: "#4f46e5",
+            height: 3
+          }
+        }}
+      >
+        <Tab
+          label={
+            <Badge 
+              badgeContent={statusCounts.total} 
+              color="primary"
+              sx={{ '& .MuiBadge-badge': { right: -15 } }}
+            >
+              All
+            </Badge>
+          }
+          value="all"
+          sx={{ minHeight: 48 }}
+        />
+        <Tab
+          label={
+            <Badge 
+              badgeContent={statusCounts.pending || 0} 
+              color="warning"
+              sx={{ '& .MuiBadge-badge': { right: -15 } }}
+            >
+              Pending
+            </Badge>
+          }
+          value="pending"
+          sx={{ minHeight: 48 }}
+        />
+        <Tab
+          label={
+            <Badge 
+              badgeContent={statusCounts.approved || 0} 
+              color="success"
+              sx={{ '& .MuiBadge-badge': { right: -15 } }}
+            >
+              Approved
+            </Badge>
+          }
+          value="approved"
+          sx={{ minHeight: 48 }}
+        />
+        <Tab
+          label={
+            <Badge 
+              badgeContent={statusCounts.rejected || 0} 
+              color="error"
+              sx={{ '& .MuiBadge-badge': { right: -15 } }}
+            >
+              Rejected
+            </Badge>
+          }
+          value="rejected"
+          sx={{ minHeight: 48 }}
+        />
+      </Tabs>
+
+      {/* Tasks List */}
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-          <CircularProgress />
-        </Box>
-      ) : filteredTasks.length > 0 ? (
-        <Box className="space-y-3">
-          {filteredTasks.map((task) => (
-            <Box key={task.id}>
-              <TaskCard>
-                <Box className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <Box className="flex items-start gap-4 w-full">
-                    <Box className="flex items-center">
-                      <IconButton onClick={() => toggleTaskExpand(task.id)}>
-                        {expandedTask === task.id ? (
-                          <FiChevronDown size={20} color="#64748b" />
-                        ) : (
-                          <FiChevronRight size={20} color="#64748b" />
-                        )}
-                      </IconButton>
-                    </Box>
-                    
-                    <Box className="flex-grow">
-                      <Box className="flex items-center gap-2 mb-1">
-                        <Typography 
-                          variant="subtitle1" 
-                          sx={{ 
-                            fontWeight: 'bold',
-                            textDecoration: task.status === 'completed' ? 'line-through' : 'none',
-                            color: task.status === 'completed' ? '#94a3b8' : '#1e293b'
-                          }}
-                        >
+        <LinearProgress sx={{ my: 3 }} />
+      ) : projects.length === 0 ? (
+        <Card>
+          <CardContent sx={{ textAlign: "center", py: 6 }}>
+            <FiMessageSquare size={48} className="text-gray-400 mx-auto mb-3" />
+            <Typography variant="h6" sx={{ fontWeight: "bold", mb: 1 }}>
+              No projects assigned
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              You don't have any projects yet. When you do, your tasks will appear here.
+            </Typography>
+          </CardContent>
+        </Card>
+      ) : filteredTasks.length === 0 ? (
+        <Card>
+          <CardContent sx={{ textAlign: "center", py: 6 }}>
+            <FiMessageSquare size={48} className="text-gray-400 mx-auto mb-3" />
+            <Typography variant="h6" sx={{ fontWeight: "bold", mb: 1 }}>
+              No tasks found
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {searchQuery
+                ? "No tasks match your search criteria"
+                : "No tasks match your current filters"}
+            </Typography>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <TableContainer component={Paper} sx={{ borderRadius: 2, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+            <Table>
+              <TableHead sx={{ backgroundColor: "#f8fafc" }}>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: "bold" }}>Task</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>Project</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>Submitted By</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>Priority</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>Due Date</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: "bold" }}>Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paginatedTasks.map((task) => (
+                  <React.Fragment key={task.id}>
+                    <TableRow hover>
+                      <TableCell>
+                        <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
                           {task.title}
                         </Typography>
-                        {task.priority && (
-                          <Chip
-                            label={task.priority}
-                            size="small"
-                            sx={{
-                              backgroundColor: priorityColors[task.priority] + '20',
-                              color: priorityColors[task.priority],
-                              fontWeight: 'bold',
-                              textTransform: 'capitalize',
-                              fontSize: '0.7rem'
-                            }}
-                          />
-                        )}
-                      </Box>
-                      
-                      <Box className="flex flex-wrap items-center gap-2">
-                        <Chip
-                          label={task.status || 'pending'}
-                          size="small"
-                          icon={statusColors[task.status]?.icon}
-                          sx={{
-                            backgroundColor: statusColors[task.status]?.bg,
-                            color: statusColors[task.status]?.text,
-                            fontWeight: 'medium',
-                            textTransform: 'capitalize'
-                          }}
-                        />
-                        
-                        <Chip
-                          label={task.type || 'general'}
-                          size="small"
-                          sx={{
-                            backgroundColor: '#f1f5f9',
-                            color: '#64748b',
-                            fontWeight: 'medium',
-                            textTransform: 'capitalize'
-                          }}
-                        />
-                        
-                        <Box className="flex items-center gap-1">
-                          <FiCalendar size={14} color="#94a3b8" />
-                          <Typography variant="caption" sx={{ color: '#94a3b8' }}>
-                            {formatDate(task.dueDate || task.createdAt)}
+                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: "0.75rem" }}>
+                          {task.notes?.substring(0, 60)}...
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: "medium" }}>
+                          {task.projectTitle}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <Avatar 
+                            src={task.assignee?.avatar} 
+                            sx={{ width: 32, height: 32 }}
+                          >
+                            {task.createdByName?.charAt(0)}
+                          </Avatar>
+                          <Typography variant="body2">
+                            {task.createdByName}
                           </Typography>
                         </Box>
-                        
-                        {task.projectId && (
-                          <Chip
-                            label={`Project: ${task.projectId.substring(0, 5)}...`}
-                            size="small"
-                            sx={{
-                              backgroundColor: '#e0f2fe',
-                              color: '#0369a1',
-                              fontWeight: 'medium'
-                            }}
-                          />
-                        )}
-                      </Box>
-                    </Box>
-                    
-                    <Box className="flex items-center gap-2">
-                      <Box sx={{ minWidth: 120 }}>
-                        <LinearProgress 
-                          variant="determinate" 
-                          value={getTaskProgress(task)} 
-                          sx={{
-                            height: 6,
-                            borderRadius: 3,
-                            backgroundColor: '#e2e8f0',
-                            '& .MuiLinearProgress-bar': {
-                              backgroundColor: statusColors[task.status]?.text || '#64748b'
-                            }
-                          }} 
-                        />
-                        <Typography variant="caption" sx={{ color: '#64748b', textAlign: 'center', display: 'block' }}>
-                          {getTaskProgress(task)}% complete
-                        </Typography>
-                      </Box>
-                      
-                      <Box className="flex items-center gap-1">
-                        <Avatar 
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={task.priority}
+                          size="small"
+                          color={getPriorityColor(task.priority)}
                           sx={{ 
-                            width: 32, 
-                            height: 32, 
-                            bgcolor: '#e0e7ff',
-                            color: '#4f46e5',
-                            fontSize: '0.75rem',
-                            fontWeight: 'bold'
+                            fontWeight: "bold",
+                            fontSize: "0.65rem",
+                            textTransform: "capitalize"
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <FiClock size={14} className="text-gray-500" />
+                          <Typography variant="body2">
+                            {formatDate(task.dueDate)}
+                          </Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={task.status.replace("_", " ")}
+                          size="small"
+                          color={getStatusColor(task.status)}
+                          sx={{ 
+                            fontWeight: "bold",
+                            fontSize: "0.65rem",
+                            textTransform: "capitalize"
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: "flex", gap: 1 }}>
+                          <Tooltip title="View Details">
+                            <IconButton
+                              size="small"
+                              sx={{
+                                backgroundColor: "#e0e7ff",
+                                color: "#4f46e5",
+                                '&:hover': {
+                                  backgroundColor: "#c7d2fe"
+                                }
+                              }}
+                              onClick={() => openFeedbackDialog(task)}
+                            >
+                              <FiEye size={16} />
+                            </IconButton>
+                          </Tooltip>
+                          {task.submissionType === "file" ? (
+                            <Tooltip title="Download File">
+                              <IconButton
+                                size="small"
+                                href={task.file?.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  backgroundColor: "#f1f5f9",
+                                  color: "#64748b",
+                                  '&:hover': {
+                                    backgroundColor: "#e2e8f0"
+                                  }
+                                }}
+                              >
+                                <FiDownload size={16} />
+                              </IconButton>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title="Open Link">
+                              <IconButton
+                                size="small"
+                                href={task.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  backgroundColor: "#f1f5f9",
+                                  color: "#64748b",
+                                  '&:hover': {
+                                    backgroundColor: "#e2e8f0"
+                                  }
+                                }}
+                              >
+                                <FiExternalLink size={16} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={7} sx={{ p: 0 }}>
+                        <Accordion
+                          sx={{
+                            backgroundColor: "#f8fafc",
+                            boxShadow: "none",
+                            '&:before': { display: "none" }
                           }}
                         >
-                          {task.assignee?.avatar || 'U'}
-                        </Avatar>
-                      </Box>
-                    </Box>
-                  </Box>
-                </Box>
-              </TaskCard>
-              
-              {expandedTask === task.id && (
-                <ExpandableSection sx={{ p: 3, mb: 2 }}>
-                  <Grid container spacing={3}>
-                    <Grid item xs={12} md={8}>
-                      <Typography variant="subtitle2" sx={{ color: '#64748b', mb: 1 }}>
-                        DESCRIPTION
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#334155', mb: 3 }}>
-                        {task.description || "No description provided"}
-                      </Typography>
-                      
-                      {task.type === 'approval' && task.submissionId && (
-  <>
-    <Typography variant="subtitle2" sx={{ color: '#64748b', mb: 1 }}>
-      SUBMISSION DETAILS
-    </Typography>
-    <Box sx={{ 
-      backgroundColor: 'white', 
-      p: 2, 
-      borderRadius: 1,
-      border: '1px solid #e2e8f0'
-    }}>
-      {submissionLoading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
-          <CircularProgress size={24} />
-        </Box>
-      ) : submissionData ? (
-        <>
-          <Typography variant="body2" sx={{ fontWeight: 'medium', mb: 1 }}>
-            {submissionData.title || task.title}
-          </Typography>
-          {submissionData.link && (
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<FiExternalLink size={14} />}
-              sx={{
-                borderColor: '#e2e8f0',
-                color: '#4f46e5',
-                '&:hover': {
-                  borderColor: '#cbd5e1',
-                  backgroundColor: '#f8fafc',
-                }
-              }}
-              href={submissionData.link.startsWith('http') ? submissionData.link : `https://${submissionData.link}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              View Submission
-            </Button>
+                          <AccordionSummary
+                            expandIcon={<FiChevronDown />}
+                            sx={{
+                              minHeight: "48px !important",
+                              '& .MuiAccordionSummary-content': {
+                                margin: "12px 0"
+                              }
+                            }}
+                          >
+                            <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
+                              Submission Details
+                            </Typography>
+                          </AccordionSummary>
+                          <AccordionDetails sx={{ pt: 0, pb: 2 }}>
+                            <Grid container spacing={2}>
+                              <Grid item xs={12} md={6}>
+                                <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
+                                  Submission
+                                </Typography>
+                                {task.submissionType === "file" ? (
+                                  <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                                    <FiFile className="text-gray-500" />
+                                    <Typography variant="body2" sx={{ fontWeight: "medium" }}>
+                                      {task.file?.name || "File submission"}
+                                    </Typography>
+                                    <Button
+                                      size="small"
+                                      startIcon={<FiDownload size={14} />}
+                                      href={task.file?.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      sx={{
+                                        ml: 1,
+                                        fontSize: "0.65rem",
+                                        textTransform: "none",
+                                        color: "#4f46e5"
+                                      }}
+                                    >
+                                      Download
+                                    </Button>
+                                  </Box>
+                                ) : (
+                                  <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                                    <FiLink className="text-gray-500" />
+                                    <Typography variant="body2" sx={{ fontWeight: "medium" }}>
+                                      {task.link || "Link submission"}
+                                    </Typography>
+                                    <Button
+                                      size="small"
+                                      startIcon={<FiExternalLink size={14} />}
+                                      href={task.link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      sx={{
+                                        ml: 1,
+                                        fontSize: "0.65rem",
+                                        textTransform: "none",
+                                        color: "#4f46e5"
+                                      }}
+                                    >
+                                      Open
+                                    </Button>
+                                  </Box>
+                                )}
+                              </Grid>
+                              <Grid item xs={12} md={6}>
+                                <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
+                                  Notes
+                                </Typography>
+                                <Typography variant="body2" sx={{ color: "#64748b" }}>
+                                  {task.notes || "No notes provided"}
+                                </Typography>
+                              </Grid>
+                              {task.status !== "pending" && (
+                                <Grid item xs={12}>
+                                  <Box sx={{ 
+                                    backgroundColor: "#f8fafc", 
+                                    p: 2, 
+                                    borderRadius: 1,
+                                    borderLeft: "4px solid #e2e8f0"
+                                  }}>
+                                    <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
+                                      Your Response
+                                    </Typography>
+                                    {task.clientRating > 0 && (
+                                      <Box sx={{ display: "flex", alignItems: "center", mb: 1 }}>
+                                        <Rating
+                                          value={task.clientRating}
+                                          readOnly
+                                          precision={0.5}
+                                          size="small"
+                                        />
+                                        <Typography variant="body2" sx={{ ml: 1, color: "#64748b" }}>
+                                          ({task.clientRating.toFixed(1)})
+                                        </Typography>
+                                      </Box>
+                                    )}
+                                    <Typography variant="body2" sx={{ color: "#64748b" }}>
+                                      {task.clientFeedback || "No feedback provided"}
+                                    </Typography>
+                                    {task.updatedAt && (
+                                      <Typography variant="caption" sx={{ display: "block", mt: 1, color: "#94a3b8" }}>
+                                        Responded on {formatDateTime(task.updatedAt)}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                </Grid>
+                              )}
+                            </Grid>
+                          </AccordionDetails>
+                        </Accordion>
+                      </TableCell>
+                    </TableRow>
+                  </React.Fragment>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+
+          {/* Pagination */}
+          {filteredTasks.length > 0 && (
+            <Box sx={{ display: "flex", justifyContent: "center", mt: 3 }}>
+              <Pagination
+                count={Math.ceil(filteredTasks.length / rowsPerPage)}
+                page={page}
+                onChange={handlePageChange}
+                color="primary"
+                shape="rounded"
+              />
+            </Box>
           )}
         </>
-      ) : (
-        fetchSubmissionDetails(task.submissionId)
-      )}
-    </Box>
-  </>
-)}
-                    </Grid>
-                    
-                    <Grid item xs={12} md={4}>
-                      <Typography variant="subtitle2" sx={{ color: '#64748b', mb: 2 }}>
-                        ACTIONS
-                      </Typography>
-
-                     
-                      
-                      <Box className="space-y-2">
-  {task.type === 'approval' ? (
-    // Only show approve/reject buttons if submission isn't already approved/rejected
-    submissionData?.status !== 'approved' && submissionData?.status !== 'rejected' ? (
-      <>
-        <Button
-          fullWidth
-          variant="contained"
-          startIcon={<FiCheck size={16} />}
-          onClick={() => openActionDialog(task.id, 'approve')}
-          sx={{
-            backgroundColor: '#ecfdf5',
-            color: '#10b981',
-            '&:hover': {
-              backgroundColor: '#d1fae5',
-            }
-          }}
-        >
-          Approve
-        </Button>
-        <Button
-          fullWidth
-          variant="contained"
-          startIcon={<FiX size={16} />}
-          onClick={() => openActionDialog(task.id, 'reject')}
-          sx={{
-            backgroundColor: '#fee2e2',
-            color: '#ef4444',
-            '&:hover': {
-              backgroundColor: '#fecaca',
-            }
-          }}
-        >
-          Reject
-        </Button>
-      </>
-    ) : (
-      <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', py: 1 }}>
-        This submission has already been {submissionData?.status}
-      </Typography>
-    )
-  ) : (
-    <>
-      {task.status !== 'completed' && (
-        <Button
-          fullWidth
-          variant="contained"
-          startIcon={<FiCheck size={16} />}
-          onClick={() => handleTaskAction(task.id, 'complete')}
-          sx={{
-            backgroundColor: '#ecfdf5',
-            color: '#10b981',
-            '&:hover': {
-              backgroundColor: '#d1fae5',
-            }
-          }}
-        >
-          Mark Complete
-        </Button>
-      )}
-      {task.status === 'pending' && (
-        <Button
-          fullWidth
-          variant="contained"
-          startIcon={<FiRefreshCw size={16} />}
-          onClick={() => handleTaskAction(task.id, 'start')}
-          sx={{
-            backgroundColor: '#e0e7ff',
-            color: '#4f46e5',
-            '&:hover': {
-              backgroundColor: '#c7d2fe',
-            }
-          }}
-        >
-          Start Task
-        </Button>
-      )}
-    </>
-  )}
-                        
-                        
-                        <Button
-                          fullWidth
-                          variant="outlined"
-                          startIcon={<FiFlag size={16} />}
-                          onClick={() => {
-                            // Implement flag issue functionality
-                            alert(`Flagging issue with task: ${task.id}`);
-                          }}
-                          sx={{
-                            borderColor: '#fee2e2',
-                            color: '#ef4444',
-                            '&:hover': {
-                              borderColor: '#fecaca',
-                              backgroundColor: '#fef2f2',
-                            }
-                          }}
-                        >
-                          Flag Issue
-                        </Button>
-                      </Box>
-                    </Grid>
-                  </Grid>
-                </ExpandableSection>
-              )}
-            </Box>
-          ))}
-        </Box>
-      ) : (
-        <Paper sx={{
-          p: 6,
-          textAlign: 'center',
-          borderRadius: 2,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-          backgroundColor: '#f8fafc'
-        }}>
-          <FiAlertCircle size={48} color="#94a3b8" className="mx-auto mb-4" />
-          <Typography variant="h6" sx={{ color: '#64748b', mb: 1 }}>
-            No tasks found
-          </Typography>
-          <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-            {searchTerm || statusFilter !== 'all' || typeFilter !== 'all'
-              ? "Try adjusting your search or filter criteria" 
-              : "You don't have any tasks assigned yet"}
-          </Typography>
-        </Paper>
       )}
 
-      {/* Comment Dialog */}
+      {/* Feedback Dialog */}
       <Dialog
-        open={commentDialogOpen}
-        onClose={() => setCommentDialogOpen(false)}
-        maxWidth="sm"
+        open={openDialog}
+        onClose={closeFeedbackDialog}
         fullWidth
+        maxWidth="sm"
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            boxShadow: "0 10px 25px rgba(0,0,0,0.1)"
+          }
+        }}
       >
-        <DialogTitle>Add Comment</DialogTitle>
-        <DialogContent>
-          <TextareaAutosize
-            minRows={4}
-            placeholder="Enter your comment here..."
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '12px',
-              borderRadius: '8px',
-              border: '1px solid #E5E7EB',
-              fontFamily: 'inherit',
-              fontSize: '0.875rem',
-              resize: 'vertical',
-              marginTop: '16px'
-            }}
-          />
+        <DialogTitle sx={{ 
+          fontWeight: 600,
+          borderBottom: "1px solid #e2e8f0",
+          py: 2.5
+        }}>
+          {selectedTask?.title || "Task Feedback"}
+        </DialogTitle>
+        <DialogContent sx={{ py: 3 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
+                Rating
+              </Typography>
+              <Rating
+                value={rating}
+                onChange={(e, newValue) => setRating(newValue)}
+                precision={0.5}
+                size="large"
+                emptyIcon={<FiStar style={{ opacity: 0.55 }} fontSize="inherit" />}
+              />
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
+                Feedback
+              </Typography>
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="Provide your feedback here..."
+                variant="outlined"
+                InputProps={{
+                  sx: { backgroundColor: "white" }
+                }}
+              />
+            </Box>
+            {selectedTask?.submissionType === "file" && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: "bold", mb: 1 }}>
+                  Submission File
+                </Typography>
+                <Box sx={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: 2,
+                  p: 2,
+                  backgroundColor: "#f8fafc",
+                  borderRadius: 1
+                }}>
+                  <FiFile size={24} className="text-gray-500" />
+                  <Typography variant="body2" sx={{ fontWeight: "medium" }}>
+                    {selectedTask?.file?.name || "File submission"}
+                  </Typography>
+                  <Button
+                    size="small"
+                    startIcon={<FiDownload size={14} />}
+                    href={selectedTask?.file?.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{
+                      ml: "auto",
+                      fontSize: "0.65rem",
+                      textTransform: "none",
+                      color: "#4f46e5"
+                    }}
+                  >
+                    Download
+                  </Button>
+                </Box>
+              </Box>
+            )}
+          </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCommentDialogOpen(false)}>Cancel</Button>
+        <DialogActions sx={{ 
+          p: 3,
+          borderTop: "1px solid #e2e8f0",
+          justifyContent: "space-between"
+        }}>
           <Button 
-            onClick={() => {
-              if (commentText.trim()) {
-                handleTaskAction(currentCommentTask, 'comment', commentText);
+            onClick={closeFeedbackDialog}
+            sx={{ 
+              color: "#64748b",
+              '&:hover': {
+                backgroundColor: "#f1f5f9"
               }
             }}
-            variant="contained"
-            disabled={!commentText.trim()}
           >
-            Submit
+            Cancel
           </Button>
+          <Box sx={{ display: "flex", gap: 2 }}>
+            <Button 
+              variant="contained"
+              color="error"
+              startIcon={<FiX size={18} />}
+              onClick={() => submitFeedback("rejected")}
+              disabled={submitting}
+              sx={{
+                px: 3,
+                py: 1,
+                '&:disabled': {
+                  backgroundColor: "#e2e8f0",
+                  color: "#94a3b8"
+                }
+              }}
+            >
+              Reject
+            </Button>
+            <Button 
+              variant="contained"
+              color="success"
+              startIcon={<FiCheck size={18} />}
+              onClick={() => submitFeedback("approved")}
+              disabled={submitting}
+              sx={{
+                px: 3,
+                py: 1,
+                '&:disabled': {
+                  backgroundColor: "#e2e8f0",
+                  color: "#94a3b8"
+                }
+              }}
+            >
+              Approve
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
 
-      {/* Action Dialog (Approve/Reject) */}
-      <Dialog
-        open={actionDialogOpen}
-        onClose={() => setActionDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
       >
-        <DialogTitle>
-          {actionType === 'approve' ? 'Approve Task' : 'Reject Task'}
-        </DialogTitle>
-        <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            {actionType === 'approve' 
-              ? 'Please confirm approval of this task. You can add optional feedback below:'
-              : 'Please provide a reason for rejecting this task:'}
-          </DialogContentText>
-          <TextareaAutosize
-            minRows={4}
-            placeholder={
-              actionType === 'approve' 
-                ? 'Optional feedback...' 
-                : 'Reason for rejection...'
-            }
-            value={feedbackText}
-            onChange={(e) => setFeedbackText(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '12px',
-              borderRadius: '8px',
-              border: '1px solid #E5E7EB',
-              fontFamily: 'inherit',
-              fontSize: '0.875rem',
-              resize: 'vertical'
-            }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setActionDialogOpen(false)}>Cancel</Button>
-          <Button 
-            onClick={() => {
-              handleTaskAction(
-                currentActionTask, 
-                actionType, 
-                feedbackText || (actionType === 'approve' ? 'Approved' : 'Rejected')
-              );
-            }}
-            variant="contained"
-            color={actionType === 'approve' ? 'success' : 'error'}
-            disabled={actionType === 'reject' && !feedbackText.trim()}
-          >
-            {actionType === 'approve' ? 'Approve' : 'Reject'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

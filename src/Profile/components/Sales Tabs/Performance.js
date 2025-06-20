@@ -3,17 +3,23 @@ import {
   Card, CardContent, Typography, Box, Grid, Paper, 
   LinearProgress, Button, FormControl, InputLabel, 
   Select, MenuItem, Chip, CircularProgress,
-  Divider
+  Divider, Avatar, Stack,
+  Tooltip as MuiTooltip, List, ListItem, ListItemAvatar, ListItemText, 
 } from "@mui/material";
 import { 
   FiDollarSign, FiTrendingUp, FiClock, FiDownload,
-  FiBarChart2, FiPieChart, FiRefreshCw, FiCalendar
+  FiBarChart2, FiPieChart, FiRefreshCw, FiCalendar,
+  FiUser, FiCheckCircle, FiXCircle, FiDroplet,
+  FiLayers, FiTarget, FiAward, FiDatabase,
+  FiArrowRight, FiAlertCircle, FiBarChart, FiFileText
 } from "react-icons/fi";
 import { auth, db } from "../../../services/firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
-  Legend, ResponsiveContainer, PieChart, Pie, Cell
+  Legend, ResponsiveContainer, PieChart, Pie, Cell,
+  AreaChart, Area, RadialBarChart, RadialBar,
+  ComposedChart, Line
 } from 'recharts';
 
 const PerformanceTab = () => {
@@ -27,10 +33,27 @@ const PerformanceTab = () => {
     monthlyTrends: [],
     dealSizeDistribution: []
   });
+  const [pipelineStats, setPipelineStats] = useState({
+    totalValue: 0,
+    avgDealSize: 0,
+    winRate: 0,
+    hotLeads: 0,
+    stuckDeals: 0,
+    daysInPipeline: 0
+  });
+  const [stageAnalysis, setStageAnalysis] = useState([]);
   const [timeRange, setTimeRange] = useState('last_quarter');
   const [loading, setLoading] = useState(true);
 
   const COLORS = ['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'];
+  const STAGE_COLORS = {
+    'new': '#4f46e5',
+    'contacted': '#6366f1',
+    'proposal-sent': '#818cf8',
+    'negotiation': '#a5b4fc',
+    'closed-won': '#10b981',
+    'closed-lost': '#ef4444'
+  };
 
   useEffect(() => {
     const fetchPerformanceData = async () => {
@@ -74,6 +97,14 @@ const PerformanceTab = () => {
         let totalSalesCycleDays = 0;
         let dealCount = 0;
         const monthlyTrends = Array(12).fill(0);
+        
+        // Pipeline analysis metrics
+        let totalValue = 0;
+        let hotLeads = 0;
+        let stuckDeals = 0;
+        let totalDaysInPipeline = 0;
+        let activeDeals = 0;
+        
         const leadStatusCount = {
           'new': 0,
           'contacted': 0,
@@ -82,6 +113,7 @@ const PerformanceTab = () => {
           'closed-won': 0,
           'closed-lost': 0
         };
+        
         const dealSizeRanges = {
           '0-10k': 0,
           '10k-50k': 0,
@@ -125,6 +157,33 @@ const PerformanceTab = () => {
             dealCount++;
           }
 
+          // Pipeline analysis calculations
+          if (lead.status && !['closed-won', 'closed-lost'].includes(lead.status)) {
+            totalValue += budget;
+            activeDeals++;
+            
+            // Calculate days in pipeline
+            if (lead.createdAt) {
+              const createdDate = lead.createdAt.toDate();
+              const daysInPipeline = Math.ceil((new Date() - createdDate) / (1000 * 60 * 60 * 24));
+              totalDaysInPipeline += daysInPipeline;
+            }
+          }
+
+          // Count hot leads (recent and high priority)
+          if (lead.priority === 'high' && 
+              lead.createdAt && 
+              new Date() - lead.createdAt.toDate() < 7 * 24 * 60 * 60 * 1000) {
+            hotLeads++;
+          }
+
+          // Count stuck deals (in same stage for >30 days)
+          if (lead.lastUpdated && 
+              new Date() - lead.lastUpdated.toDate() > 30 * 24 * 60 * 60 * 1000 &&
+              !['closed-won', 'closed-lost'].includes(lead.status)) {
+            stuckDeals++;
+          }
+
           // Group by month for trends
           if (lead.createdAt) {
             const month = lead.createdAt.toDate().getMonth();
@@ -135,7 +194,8 @@ const PerformanceTab = () => {
         // Prepare data for charts
         const leadStatusData = Object.entries(leadStatusCount).map(([name, value]) => ({
           name: name.replace('-', ' '),
-          value
+          value,
+          fill: STAGE_COLORS[name]
         }));
 
         const dealSizeData = Object.entries(dealSizeRanges).map(([name, value]) => ({
@@ -171,6 +231,17 @@ const PerformanceTab = () => {
           dealSizeDistribution: dealSizeData
         });
 
+        setPipelineStats({
+          totalValue,
+          avgDealSize: activeDeals > 0 ? totalValue / activeDeals : 0,
+          winRate: totalDeals > 0 ? (wonDeals / totalDeals) * 100 : 0,
+          hotLeads,
+          stuckDeals,
+          daysInPipeline: activeDeals > 0 ? Math.round(totalDaysInPipeline / activeDeals) : 0
+        });
+
+        setStageAnalysis(leadStatusData);
+
       } catch (err) {
         console.error('Error fetching performance data:', err);
       } finally {
@@ -184,6 +255,29 @@ const PerformanceTab = () => {
   const progressValue = performanceData.revenue.target > 0 ? 
     Math.min((performanceData.revenue.current / performanceData.revenue.target) * 100, 100) : 0;
 
+  const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * Math.PI / 180);
+    const y = cy + radius * Math.sin(-midAngle * Math.PI / 180);
+
+    return (
+      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" className="text-xs font-medium">
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
+  const getStatusIcon = (status) => {
+    switch(status) {
+      case 'closed-won': return <FiCheckCircle className="text-green-500" />;
+      case 'closed-lost': return <FiXCircle className="text-red-500" />;
+      case 'negotiation': return <FiDollarSign className="text-yellow-500" />;
+      case 'proposal-sent': return <FiFileText className="text-blue-500" />;
+      case 'contacted': return <FiUser className="text-purple-500" />;
+      default: return <FiUser className="text-indigo-500" />;
+    }
+  };
+
   if (loading) {
     return (
       <Box className="flex justify-center items-center h-64">
@@ -194,8 +288,8 @@ const PerformanceTab = () => {
 
   return (
     <Box className="space-y-6">
-      {/* Performance Overview */}
-      <Card className="shadow-lg rounded-xl border border-gray-200">
+           {/* Performance Overview */}
+           <Card className="shadow-lg rounded-xl border border-gray-200">
         <CardContent className="p-6">
           <Typography variant="h6" className="font-bold text-gray-800 mb-4">
             Performance Overview
@@ -262,27 +356,7 @@ const PerformanceTab = () => {
               </Paper>
             </Grid>
             
-            {/* Activity Card */}
-            <Grid item xs={12} md={4}>
-              <Paper className="p-4 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 h-full">
-                <Box className="flex items-center justify-between mb-2">
-                  <Typography variant="subtitle2" className="text-amber-600">
-                    Avg. Deal Cycle
-                  </Typography>
-                  <FiClock className="text-amber-400" size={20} />
-                </Box>
-                <Typography variant="h4" className="font-bold text-amber-900 mb-2">
-                  {performanceData.avgDealCycle} days
-                </Typography>
-                <Box className="flex items-center">
-                  <Chip 
-                    label="Industry avg: 21 days"
-                    size="small"
-                    className="bg-amber-100 text-amber-800"
-                  />
-                </Box>
-              </Paper>
-            </Grid>
+          
           </Grid>
         </CardContent>
       </Card>
@@ -321,7 +395,7 @@ const PerformanceTab = () => {
           
           <Box className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
+              <ComposedChart
                 data={performanceData.monthlyTrends}
                 margin={{
                   top: 5,
@@ -343,169 +417,143 @@ const PerformanceTab = () => {
                 />
                 <Legend />
                 <Bar dataKey="revenue" name="Actual Revenue" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="target" name="Revenue Target" fill="#c7d2fe" radius={[4, 4, 0, 0]} />
-              </BarChart>
+               
+              </ComposedChart>
             </ResponsiveContainer>
           </Box>
         </CardContent>
       </Card>
       
-   {/* Pipeline Analysis */}
-<Card className="shadow-lg rounded-xl border border-gray-200">
-  <CardContent className="p-6">
-    <Typography variant="h6" className="font-bold text-gray-800 mb-4">
-      Pipeline Analysis
-    </Typography>
-    
-    <Grid >
-      {/* Lead Status Distribution */}
-      <Grid item xs={12} md={6}>
-        <Paper elevation={0} className="p-4 rounded-lg h-full flex flex-col">
-          <Box className="flex items-center justify-between mb-3">
-            <Typography variant="subtitle1" className="font-medium text-gray-700">
-              Lead Status Distribution
+      {/* Enhanced Pipeline Analysis */}
+      <Card className="shadow-lg rounded-xl border border-gray-200">
+        <CardContent className="p-6">
+          <Box className="flex justify-between items-center mb-6">
+            <Typography variant="h5" className="font-bold text-gray-800">
+              Pipeline Analysis
             </Typography>
-            <FiBarChart2 className="text-indigo-500" size={20} />
+            <Box className="flex items-center space-x-2">
+              <Button 
+                variant="outlined" 
+                startIcon={<FiRefreshCw size={16} />}
+                size="small"
+                onClick={() => window.location.reload()}
+              >
+                Refresh
+              </Button>
+              <Button 
+                variant="contained" 
+                startIcon={<FiDownload size={16} />}
+                size="small"
+                className="bg-indigo-600 hover:bg-indigo-700"
+              >
+                Export
+              </Button>
+            </Box>
           </Box>
-          <Box className="flex-1" sx={{ minHeight: '300px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={performanceData.leadStatus}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={({ name, percent }) => (
-                    <text 
-                      x={0} 
-                      y={0} 
-                      fill="#374151" 
-                      textAnchor="middle" 
-                      dominantBaseline="central"
+
+          {/* Conversion Funnel */}
+          <Box className="mt-6">
+            <Card variant="outlined" className="rounded-lg">
+              <CardContent>
+                <Typography variant="h6" className="font-bold text-gray-800 mb-4">
+                  Conversion Funnel
+                </Typography>
+                <Box sx={{ height: 300 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={[
+                        { name: 'New', value: stageAnalysis.find(s => s.name === 'new')?.value || 0 },
+                        { name: 'Contacted', value: stageAnalysis.find(s => s.name === 'contacted')?.value || 0 },
+                        { name: 'Proposal Sent', value: stageAnalysis.find(s => s.name === 'proposal sent')?.value || 0 },
+                        { name: 'Negotiation', value: stageAnalysis.find(s => s.name === 'negotiation')?.value || 0 },
+                        { name: 'Closed Won', value: stageAnalysis.find(s => s.name === 'closed won')?.value || 0 }
+                      ]}
+                      margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
                     >
-                      {`${(percent * 100).toFixed(0)}%`}
-                    </text>
-                  )}
-                >
-                  {performanceData.leadStatus.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={COLORS[index % COLORS.length]} 
-                      stroke="#fff"
-                      strokeWidth={1}
-                    />
+                      <defs>
+                        <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <Tooltip 
+                        contentStyle={{
+                          backgroundColor: '#ffffff',
+                          borderColor: '#e2e8f0',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                        }}
+                        formatter={(value) => [`${value} leads`]}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke="#4f46e5" 
+                        fillOpacity={1} 
+                        fill="url(#colorValue)" 
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </Box>
+              </CardContent>
+            </Card>
+          </Box>
+
+          {/* Recent Activity */}
+          <Box className="mt-6">
+            <Card variant="outlined" className="rounded-lg">
+              <CardContent>
+                <Typography variant="h6" className="font-bold text-gray-800 mb-4">
+                  Recent Activity
+                </Typography>
+                <List sx={{ width: '100%' }}>
+                  {performanceData.leadStatus.slice(0, 5).map((lead, index) => (
+                    <React.Fragment key={index}>
+                      <ListItem alignItems="flex-start" className="hover:bg-gray-50 rounded-lg">
+                        <ListItemAvatar>
+                          <Avatar className="bg-indigo-100 text-indigo-600">
+                            {getStatusIcon(lead.name.replace(' ', '-'))}
+                          </Avatar>
+                        </ListItemAvatar>
+                        <ListItemText
+                          primary={
+                            <Typography variant="subtitle1" className="font-medium">
+                              {lead.name}
+                            </Typography>
+                          }
+                          secondary={
+                            <React.Fragment>
+                              <Typography
+                                component="span"
+                                variant="body2"
+                                className="inline-flex items-center text-gray-600"
+                              >
+                                {lead.value} leads
+                              </Typography>
+                            </React.Fragment>
+                          }
+                        />
+                        <Box className="flex items-center">
+                          <Chip 
+                            label={lead.name} 
+                            size="small" 
+                            className={`capitalize ${lead.name.includes('won') ? 'bg-green-100 text-green-800' : 
+                              lead.name.includes('lost') ? 'bg-red-100 text-red-800' : 'bg-indigo-100 text-indigo-800'}`}
+                          />
+                        </Box>
+                      </ListItem>
+                      {index < performanceData.leadStatus.length - 1 && <Divider variant="inset" component="li" />}
+                    </React.Fragment>
                   ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderColor: '#e2e8f0',
-                    borderRadius: '8px',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                    padding: '12px'
-                  }}
-                  formatter={(value, name, props) => [
-                    `${value} leads`, 
-                    props.payload.name.replace('-', ' ')
-                  ]}
-                />
-                <Legend 
-                  layout="vertical"
-                  verticalAlign="middle"
-                  align="right"
-                  wrapperStyle={{
-                    paddingLeft: '20px'
-                  }}
-                  formatter={(value, entry, index) => (
-                    <span className="text-gray-600 text-sm">
-                      {value.replace('-', ' ')}
-                    </span>
-                  )}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+                </List>
+              </CardContent>
+            </Card>
           </Box>
-        </Paper>
-      </Grid>
-      
-      {/* Deal Size Distribution */}
-      <Grid item xs={12} md={6}>
-        <Paper elevation={0} className="p-4 rounded-lg h-full flex flex-col">
-          <Box className="flex items-center justify-between mb-3">
-            <Typography variant="subtitle1" className="font-medium text-gray-700">
-              Deal Size Distribution
-            </Typography>
-            <FiPieChart className="text-indigo-500" size={20} />
-          </Box>
-          <Box className="flex-1" sx={{ minHeight: '300px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={performanceData.dealSizeDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={({ name, percent }) => (
-                    <text 
-                      x={0} 
-                      y={0} 
-                      fill="#374151" 
-                      textAnchor="middle" 
-                      dominantBaseline="central"
-                    >
-                      {`${(percent * 100).toFixed(0)}%`}
-                    </text>
-                  )}
-                >
-                  {performanceData.dealSizeDistribution.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={COLORS[index % COLORS.length]} 
-                      stroke="#fff"
-                      strokeWidth={1}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    borderColor: '#e2e8f0',
-                    borderRadius: '8px',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                    padding: '12px'
-                  }}
-                  formatter={(value, name, props) => [
-                    `${value} deals`, 
-                    props.payload.name
-                  ]}
-                />
-                <Legend 
-                  layout="vertical"
-                  verticalAlign="middle"
-                  align="right"
-                  wrapperStyle={{
-                    paddingLeft: '20px'
-                  }}
-                  formatter={(value) => (
-                    <span className="text-gray-600 text-sm">
-                      {value}
-                    </span>
-                  )}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </Box>
-        </Paper>
-      </Grid>
-    </Grid>
-  </CardContent>
-</Card>
+        </CardContent>
+      </Card>
     </Box>
   );
 };

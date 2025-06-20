@@ -30,8 +30,9 @@ import {
   FiRefreshCw
 } from "react-icons/fi";
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { updateDoc, doc, getDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
+import { updateDoc, doc, getDoc, setDoc, serverTimestamp, collection, query, where, limit, getDocs } from 'firebase/firestore';
 import { auth, db } from "../../services/firebase";
+import { FaRegStar, FaStar, FaStarHalfAlt } from "react-icons/fa";
 
 const TeamManagementDialog = ({
   open,
@@ -57,6 +58,10 @@ const TeamManagementDialog = ({
   const [projectRoles, setProjectRoles] = useState([]);
   const [newRole, setNewRole] = useState('');
   const [currentProject, setCurrentProject] = useState(project);
+  const [ratings, setRatings] = useState({
+    projectRating: null,
+    managerRating: null
+  });
 
   useEffect(() => {
     if (project) {
@@ -319,6 +324,69 @@ const TeamManagementDialog = ({
     onClose();
   };
 
+  useEffect(() => {
+    const fetchRatings = async () => {
+      if (project?.status === "Completed") {
+        try {
+          // Fetch project rating
+          const projectRatingQuery = query(
+            collection(db, "project-feedback"),
+            where("projectId", "==", project.id),
+            limit(1)
+          );
+          const projectRatingSnap = await getDocs(projectRatingQuery);
+          
+          // Fetch manager rating
+          const managerRatingQuery = query(
+            collection(db, "projectManagerRatings"),
+            where("projectId", "==", project.id),
+            limit(1)
+          );
+          const managerRatingSnap = await getDocs(managerRatingQuery);
+          
+          setRatings({
+            projectRating: projectRatingSnap.docs[0]?.data()?.rating || null,
+            managerRating: managerRatingSnap.docs[0]?.data()?.rating || null
+          });
+        } catch (error) {
+          console.error("Error fetching ratings:", error);
+        }
+      }
+    };
+
+    if (project) {
+      fetchRatings();
+      setCurrentProject(project);
+      setProjectRoles(project.roles || []);
+    }
+  }, [project]);
+
+  // Add this renderStars function
+  const renderStars = (rating) => {
+    if (rating === null) return null;
+    
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+    const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
+
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        {[...Array(fullStars)].map((_, i) => (
+          <FaStar key={`full-${i}`} style={{ color: '#f59e0b', fontSize: 16 }} />
+        ))}
+        {hasHalfStar && (
+          <FaStarHalfAlt style={{ color: '#f59e0b', fontSize: 16 }} />
+        )}
+        {[...Array(emptyStars)].map((_, i) => (
+          <FaRegStar key={`empty-${i}`} style={{ color: '#f59e0b', fontSize: 16 }} />
+        ))}
+        <Typography variant="body2" sx={{ ml: 0.5, fontWeight: 'medium' }}>
+          {rating.toFixed(1)}
+        </Typography>
+      </Box>
+    );
+  };
+
   return (
     <Dialog
       open={open}
@@ -326,10 +394,31 @@ const TeamManagementDialog = ({
       maxWidth="md"
       fullWidth
     >
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <FiUsers size={20} />
-        <span>Team Members - {currentProject?.title}</span>
-      </DialogTitle>
+       <DialogTitle sx={{ 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'space-between',
+    borderBottom: '1px solid',
+    borderColor: 'divider',
+    pb: 2
+  }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <FiUsers size={20} />
+      <Typography variant="h6" sx={{ fontWeight: '600' }}>
+        Team Management - {currentProject?.title}
+      </Typography>
+    </Box>
+    {currentProject?.status === "Completed" && (
+      <Box sx={{ display: 'flex', gap: 3 }}>
+        {ratings.projectRating && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {renderStars(ratings.projectRating)}
+          </Box>
+        )}
+     
+      </Box>
+    )}
+  </DialogTitle>
       <DialogContent dividers>
         <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>

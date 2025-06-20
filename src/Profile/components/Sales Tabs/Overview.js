@@ -12,7 +12,7 @@ import {
 } from "react-icons/fi";
 
 
-const OverviewTab = ({ userData, performanceData, recentActivities }) => {
+const OverviewTab = ({ userData, performanceData, recentActivities, onSkillsUpdate, onAddLeadClick, onCreateProposalClick, onScheduleMeetingClick }) => {
   const progressValue = performanceData.monthlyTarget > 0 ? 
     Math.min((performanceData.monthlyAchieved / performanceData.monthlyTarget) * 100, 100) : 0;
 
@@ -68,7 +68,11 @@ const OverviewTab = ({ userData, performanceData, recentActivities }) => {
               <div className="flex items-center">
                 <FiCalendar className="text-gray-500 mr-3 w-5 h-5" />
                 <Typography className="text-gray-700">
-                  Joined {userData.joinDate || "N/A"}
+                  Joined {userData.createdAt ? new Date(userData.createdAt).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  }) : "N/A"}
                 </Typography>
               </div>
               <div className="flex items-center">
@@ -77,27 +81,40 @@ const OverviewTab = ({ userData, performanceData, recentActivities }) => {
                   {userData.location || "N/A"}
                 </Typography>
               </div>
-              <div className="flex items-center">
-                <FiUsers className="text-gray-500 mr-3 w-5 h-5" />
-                <Typography className="text-gray-700">
-                  Reports to {userData.manager || "N/A"}
-                </Typography>
-              </div>
+            
             </Box>
             
             <Divider className="my-4" />
             
             <Box>
-              <Typography variant="subtitle2" className="text-gray-600 mb-2">
+            <Box className="flex justify-between items-center mb-2">
+              <Typography variant="subtitle2" className="text-gray-600">
                 Skills & Expertise
               </Typography>
-              <Box className="flex flex-wrap gap-2">
-                <Chip label="Consultative Selling" className="bg-blue-50 text-blue-700" />
-                <Chip label="CRM Software" className="bg-purple-50 text-purple-700" />
-                <Chip label="Negotiation" className="bg-green-50 text-green-700" />
-                <Chip label="Lead Generation" className="bg-yellow-50 text-yellow-700" />
-              </Box>
+              <Button 
+                size="small" 
+                startIcon={<FiPlus size={14} />}
+                onClick={() => onSkillsUpdate()}
+              >
+                Edit
+              </Button>
             </Box>
+            <Box className="flex flex-wrap gap-2">
+              {userData.skills?.length > 0 ? (
+                userData.skills.map((skill, index) => (
+                  <Chip 
+                    key={index} 
+                    label={skill} 
+                    className="bg-blue-50 text-blue-700" 
+                  />
+                ))
+              ) : (
+                <Typography variant="caption" className="text-gray-500">
+                  No skills added
+                </Typography>
+              )}
+            </Box>
+          </Box>
           </CardContent>
         </Card>
 
@@ -139,16 +156,7 @@ const OverviewTab = ({ userData, performanceData, recentActivities }) => {
                   </Typography>
                 </Paper>
               </Grid>
-              <Grid item xs={6}>
-                <Paper className="p-3 rounded-lg bg-amber-50">
-                  <Typography variant="subtitle2" className="text-amber-600">
-                    Avg. Deal Size
-                  </Typography>
-                  <Typography variant="h4" className="font-bold text-amber-900">
-                    ₹{(performanceData.monthlyAchieved / (performanceData.convertedLeads || 1)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                  </Typography>
-                </Paper>
-              </Grid>
+              
             </Grid>
           </CardContent>
         </Card>
@@ -333,6 +341,7 @@ const OverviewTab = ({ userData, performanceData, recentActivities }) => {
                 startIcon={<FiPlus />}
                 className="bg-indigo-600 hover:bg-indigo-700 shadow-md"
                 size="large"
+                onClick={onAddLeadClick}
               >
                 Add New Lead
               </Button>
@@ -342,6 +351,7 @@ const OverviewTab = ({ userData, performanceData, recentActivities }) => {
                 startIcon={<FiFileText />}
                 className="border-indigo-600 text-indigo-600 hover:bg-indigo-50"
                 size="large"
+                onClick={onCreateProposalClick}
               >
                 Create Proposal
               </Button>
@@ -351,6 +361,7 @@ const OverviewTab = ({ userData, performanceData, recentActivities }) => {
                 startIcon={<FiMessageSquare />}
                 className="border-purple-600 text-purple-600 hover:bg-purple-50"
                 size="large"
+                onClick={() => { window.location.href = '/chats' }}
               >
                 Send Message
               </Button>
@@ -360,50 +371,13 @@ const OverviewTab = ({ userData, performanceData, recentActivities }) => {
                 startIcon={<FiCalendar />}
                 className="border-green-600 text-green-600 hover:bg-green-50"
                 size="large"
+                onClick={onScheduleMeetingClick} 
               >
                 Schedule Meeting
               </Button>
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<FiShare2 />}
-                className="border-gray-600 text-gray-600 hover:bg-gray-50"
-                size="large"
-              >
-                Share Profile
-              </Button>
+             
             </Box>
             
-            <Divider className="my-4" />
-            
-            <Typography variant="subtitle2" className="text-gray-600 mb-3">
-              Upcoming Tasks
-            </Typography>
-            
-            <List className="space-y-2">
-              <ListItem className="bg-blue-50 rounded-lg p-3">
-                <ListItemAvatar>
-                  <Avatar className="bg-blue-100 text-blue-600">
-                    <FiCalendar size={18} />
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText
-                  primary="Client Meeting"
-                  secondary="Today, 2:00 PM"
-                />
-              </ListItem>
-              <ListItem className="bg-purple-50 rounded-lg p-3">
-                <ListItemAvatar>
-                  <Avatar className="bg-purple-100 text-purple-600">
-                    <FiFileText size={18} />
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText
-                  primary="Proposal Deadline"
-                  secondary="Tomorrow, 10:00 AM"
-                />
-              </ListItem>
-            </List>
           </CardContent>
         </Card>
 

@@ -8,6 +8,7 @@ import {
 import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { db, auth } from "../../services/firebase";
 import { FaRupeeSign } from "react-icons/fa";
+import { onAuthStateChanged } from "firebase/auth";
 
 const ClientDashboardCards = () => {
   const [activeProjectsCount, setActiveProjectsCount] = useState(0);
@@ -24,91 +25,12 @@ const ClientDashboardCards = () => {
   });
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const user = auth.currentUser;
-        if (!user) return;
-
-        // Get projects where current user is the client
-        const projectsQuery = query(
-          collection(db, "dxd-magnate-projects"),
-          where("clientId", "==", user.uid),
-        );
-        
-        const projectsSnapshot = await getDocs(projectsQuery);
-        setActiveProjectsCount(projectsSnapshot.size);
-        
-        // Calculate outstanding balance
-        let totalBalance = 0;
-        let paymentDueDate = "";
-        
-        projectsSnapshot.forEach(doc => {
-          const project = doc.data();
-          if (project.paymentStatus === "not_paid" && project.budget) {
-            const budgetAmount = parseFloat(project.budget) || 0;
-            const paidAmount = parseFloat(project.paidAmount) || 0;
-            totalBalance += (budgetAmount - paidAmount);
-            
-            // Calculate due date (10 days from creation)
-            if (project.createdAt) {
-              const createdDate = new Date(project.createdAt);
-              const dueDate = new Date(createdDate);
-              dueDate.setDate(dueDate.getDate() + 10);
-              paymentDueDate = dueDate.toLocaleDateString();
-            }
-          }
-        });
-        
-        setOutstandingBalance(totalBalance);
-        setDueDate(paymentDueDate);
-        setLoading(prev => ({ ...prev, projects: false, balance: false }));
-
-        // Fetch tasks data
-        const tasksQuery = query(
-          collection(db, "client-tasks"),
-          where("assignee.id", "==", user.uid)
-        );
-        
-        const tasksSnapshot = await getDocs(tasksQuery);
-        let completed = 0;
-        let pending = 0;
-        
-        tasksSnapshot.forEach(doc => {
-          const task = doc.data();
-          if (task.status === "completed") {
-            completed++;
-          } else if (task.status === "pending") {
-            pending++;
-          }
-        });
-        
-        setCompletedTasksCount(completed);
-        setPendingTasksCount(pending);
-        setLoading(prev => ({ ...prev, tasks: false }));
-
-        // Fetch recent activities for client's projects
-        const activitiesQuery = query(
-          collection(db, "project-activities"),
-          where("projectId", "in", projectsSnapshot.docs.map(doc => doc.id)),
-          limit(3)
-        );
-
-        const activitiesSnapshot = await getDocs(activitiesQuery);
-        const activitiesData = activitiesSnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            title: data.message || "Activity update",
-            time: formatActivityTime(data.timestamp?.toDate()),
-            user: data.userFullName || "System"
-          };
-        });
-
-        setRecentActivities(activitiesData);
-        setLoading(prev => ({ ...prev, activities: false }));
-
-      } catch (error) {
-        console.error("Error fetching data:", error);
+    // Set up auth state listener
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchData(user.uid);
+      } else {
+        // Handle case when user is not logged in
         setLoading({
           projects: false,
           balance: false,
@@ -116,10 +38,109 @@ const ClientDashboardCards = () => {
           activities: false
         });
       }
-    };
+    });
 
-    fetchData();
+    return () => unsubscribe(); // Clean up listener on unmount
   }, []);
+
+  const fetchData = async (userId) => {
+    try {
+      setLoading({
+        projects: true,
+        balance: true,
+        tasks: true,
+        activities: true
+      });
+
+      // Get projects where current user is the client
+      const projectsQuery = query(
+        collection(db, "dxd-magnate-projects"),
+        where("clientId", "==", userId),
+      );
+      
+      const projectsSnapshot = await getDocs(projectsQuery);
+      setActiveProjectsCount(projectsSnapshot.size);
+      
+      // Calculate outstanding balance
+      let totalBalance = 0;
+      let paymentDueDate = "";
+      
+      projectsSnapshot.forEach(doc => {
+        const project = doc.data();
+        if (project.paymentStatus === "not_paid" && project.budget) {
+          const budgetAmount = parseFloat(project.budget) || 0;
+          const paidAmount = parseFloat(project.paidAmount) || 0;
+          totalBalance += (budgetAmount - paidAmount);
+          
+          // Calculate due date (10 days from creation)
+          if (project.createdAt) {
+            const createdDate = new Date(project.createdAt);
+            const dueDate = new Date(createdDate);
+            dueDate.setDate(dueDate.getDate() + 10);
+            paymentDueDate = dueDate.toLocaleDateString();
+          }
+        }
+      });
+      
+      setOutstandingBalance(totalBalance);
+      setDueDate(paymentDueDate);
+      setLoading(prev => ({ ...prev, projects: false, balance: false }));
+
+      // Fetch tasks data
+      const tasksQuery = query(
+        collection(db, "client-tasks"),
+        where("assignee.id", "==", userId)
+      );
+      
+      const tasksSnapshot = await getDocs(tasksQuery);
+      let completed = 0;
+      let pending = 0;
+      
+      tasksSnapshot.forEach(doc => {
+        const task = doc.data();
+        if (task.status === "completed") {
+          completed++;
+        } else if (task.status === "pending") {
+          pending++;
+        }
+      });
+      
+      setCompletedTasksCount(completed);
+      setPendingTasksCount(pending);
+      setLoading(prev => ({ ...prev, tasks: false }));
+
+      // Fetch recent activities for client's projects
+      const activitiesQuery = query(
+        collection(db, "project-activities"),
+        where("projectId", "in", projectsSnapshot.docs.map(doc => doc.id)),
+        orderBy("timestamp", "desc"),
+        limit(3)
+      );
+
+      const activitiesSnapshot = await getDocs(activitiesQuery);
+      const activitiesData = activitiesSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.message || "Activity update",
+          time: formatActivityTime(data.timestamp?.toDate()),
+          user: data.userFullName || "System"
+        };
+      });
+
+      setRecentActivities(activitiesData);
+      setLoading(prev => ({ ...prev, activities: false }));
+
+    } catch (error) {
+      console.error("Error fetching data:", error);
+      setLoading({
+        projects: false,
+        balance: false,
+        tasks: false,
+        activities: false
+      });
+    }
+  };
 
   // Helper function to format activity timestamp
   const formatActivityTime = (date) => {
@@ -152,7 +173,7 @@ const ClientDashboardCards = () => {
     {
       title: "Tasks Completed",
       value: loading.tasks ? "..." : completedTasksCount.toString(),
-      change: loading.tasks ? "Loading..." : `${Math.round((completedTasksCount / (completedTasksCount + pendingTasksCount))) * 100 || 0}% of total`,
+      change: loading.tasks ? "Loading..." : `${Math.round((completedTasksCount / (completedTasksCount + pendingTasksCount || 1)) * 100 || 0)}% of total`,
       icon: <FiCheckCircle size={20} />,
       color: "text-green-600",
       bgColor: "bg-green-50"
@@ -174,6 +195,22 @@ const ClientDashboardCards = () => {
       bgColor: "bg-rose-50"
     }
   ];
+
+  // Helper function for avatar colors
+  const stringToColor = (string) => {
+    let hash = 0;
+    for (let i = 0; i < string.length; i++) {
+      hash = string.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const colors = [
+      '#4f46e5', // indigo
+      '#10b981', // emerald
+      '#f59e0b', // amber
+      '#ef4444', // red
+      '#8b5cf6', // violet
+    ];
+    return colors[Math.abs(hash) % colors.length];
+  };
 
   return (
     <div className="space-y-6">
@@ -259,21 +296,5 @@ const ClientDashboardCards = () => {
     </div>
   );
 };
-
-// Helper function for avatar colors
-function stringToColor(string) {
-  let hash = 0;
-  for (let i = 0; i < string.length; i++) {
-    hash = string.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const colors = [
-    '#4f46e5', // indigo
-    '#10b981', // emerald
-    '#f59e0b', // amber
-    '#ef4444', // red
-    '#8b5cf6', // violet
-  ];
-  return colors[Math.abs(hash) % colors.length];
-}
 
 export default ClientDashboardCards;
